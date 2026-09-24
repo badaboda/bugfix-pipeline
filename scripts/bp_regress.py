@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -82,10 +83,13 @@ def _run_side(profile, side, tree, out, meta) -> None:
     meta[f"{side}_start"] = _now()
     with open(log, "wb") as f:
         # 쪽 표지를 넘기지 않는다 — 래퍼가 쪽마다 다르게 굴 수 없게
-        subprocess.run(
-            [*profile.side_cmd, str(tree), str(names)],
-            cwd=str(profile.root), stdout=f, stderr=subprocess.STDOUT,
-        )
+        try:
+            subprocess.run(
+                [*profile.side_cmd, str(tree), str(names)],
+                cwd=str(profile.root), stdout=f, stderr=subprocess.STDOUT,
+            )
+        except OSError as e:
+            raise _Stop(EXIT_CONFIG, f"설정 오류: side_cmd 를 실행할 수 없다 — {e}")
     after = _head(tree)
     _, dirty = _git(tree, "status", "--porcelain")
     meta[f"{side}_head_after"] = after
@@ -118,7 +122,10 @@ def run(base, after, out, root=None) -> int:
             raise _Stop(EXIT_CONFIG, "설정 오류: 프로파일\n" + "\n".join(f"  - {p}" for p in e.problems))
         base, after = Path(base).resolve(), Path(after).resolve()
         _preflight(profile, base, after, out)
-        out.mkdir(parents=True, exist_ok=True)
+        try:
+            out.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            raise _Stop(EXIT_CONFIG, f"설정 오류: 출력 디렉토리를 만들 수 없다 — {e}")
         for name in _DIFF_FILES:
             # 지난 실행의 산출물을 «이번 결과»로 읽지 않는다
             (out / name).unlink(missing_ok=True)
@@ -129,6 +136,11 @@ def run(base, after, out, root=None) -> int:
     except _Stop as stop:
         print(str(stop), file=sys.stderr)
         code = stop.code
+    except Exception:
+        # 마지막 방어선 — 예상 못 한 예외가 exit 1(«새 빨강», cap 소모)로 새지 않게
+        traceback.print_exc()
+        print("측정 무효: 예상 못 한 예외", file=sys.stderr)
+        code = EXIT_VOID
     finally:
         if out.is_dir():
             (out / "META").write_text("".join(f"{k}={v}\n" for k, v in meta.items()), encoding="utf-8")

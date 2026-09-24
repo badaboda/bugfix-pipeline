@@ -161,3 +161,35 @@ def test_not_fully_pattern_starting_with_a_dash_still_voids(tmp_path):
     root, base = bp_fixture.make_host(tmp_path, [], [], {"regress.not_fully": "-*PARTIAL"})
     bp_fixture.set_mode(root, "partial")
     assert run(base, root, tmp_path / "out", root=root) == 3
+
+
+def test_wrapper_that_cannot_execute_is_a_config_error_not_red(tmp_path):
+    root, base = bp_fixture.make_host(tmp_path, [], [])
+    (root / "bin" / "side.sh").write_text("echo 샤뱅 없음\n")  # 실행 권한은 있지만 exec 불가
+    out = tmp_path / "out"
+    r = subprocess.run(
+        [sys.executable, str(SCRIPT), "run", str(base), str(root), str(out)],
+        cwd=root, capture_output=True, text=True,
+    )
+    assert r.returncode == 2, r.stderr
+    assert (out / "EXIT").read_text() == "2\n"
+
+
+def test_out_that_is_a_regular_file_is_a_config_error(tmp_path):
+    root, base = bp_fixture.make_host(tmp_path, [], [])
+    out = tmp_path / "out"
+    out.write_text("")
+    assert run(base, root, out, root=root) == 2
+
+
+def test_unexpected_exception_is_void_not_red(tmp_path):
+    root, base = bp_fixture.make_host(tmp_path, [], [])
+    profile = root / ".claude" / "bugfix-pipeline.json"
+    profile.chmod(0o000)  # load() 의 read_text 가 PermissionError — 아무 분기도 예상하지 않은 예외
+    out = tmp_path / "out"
+    out.mkdir()
+    try:
+        assert run(base, root, out, root=root) == 3
+        assert (out / "EXIT").read_text() == "3\n"
+    finally:
+        profile.chmod(0o644)
