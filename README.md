@@ -76,11 +76,12 @@ hooks/install.sh uninstall   # 제거 (작업 가지 한정이므로 끝나면 �
 | `tests/test_bugfix_verdict.py` | ✅ 이식 (pytest, 개발용) |
 | `hooks/commit-msg` · `hooks/install.sh` | ✅ 원천 최신과 동기화 · 가지 한정·연결 워크트리 install 을 실제 `git commit` 으로 실측 (수정 전 판에서 빨강 대조) |
 | `scripts/regress.sh` (`diff` + `selftest`) | ✅ R-REGRESS **판정부만** — 「전수가 돌았다」 문구는 `BP_RAN_FULLY`·`BP_NOT_FULLY` 로 주입(없으면 exit 3). selftest 다섯 축 · 사보타주 2종 대조. ❌ 실행부(두 쪽을 한 명령·같은 조건·순차로)는 프로파일 대기 |
+| `scripts/bp_profile.py` · `scripts/bp_regress.py` | ✅ 프로파일 v1 + R-REGRESS 실행부 — [`docs/profile.md`](docs/profile.md). 설치처 `--selftest` 둘 · 양성 대조 |
 | `scripts/watch.sh` | ✅ 원천 그대로 · 인자 오류·DONE 경로만 여기서 확인 (STALL·ALIVE 는 원천 실발화 근거) |
 | `agents/bug-root-cause-investigator.md` | ⚠️ 이식했으나 **아직 탈-프로젝트화 안 됨** |
 | `skills/bugfix-pipeline/SKILL.md` | ❌ **미이식** — 원본이 특정 리포에 결합돼 있어 프로파일 기반으로 재작성 필요 |
 | 범용 에이전트 6개 (RED · GREEN×2 · 게이트 · 스위퍼 · 스윕게이트) | ❌ **미작성** |
-| 프로파일(자동 감지 + 캐싱) | ❌ **미작성** |
+| 프로파일 | ✅ v1 (R-REGRESS 만, 사람이 쓰고 검사기가 잰다) · ❌ 자동 감지 없음 — 설계 결정 |
 
 ## 남은 설계 결정
 

@@ -44,7 +44,7 @@ Claude Code 플러그인 레포다. 버그 수정 요청을 원인 규명 → �
 agents/<name>.md                 frontmatter: name·description·model
 skills/bugfix-pipeline/SKILL.md
 hooks/                           commit-msg · install.sh (git 훅 — Claude Code 이벤트 훅과 다르다)
-scripts/                         bugfix_verdict.py (+ --selftest) · regress.sh (diff·selftest) · watch.sh
+scripts/                         bugfix_verdict.py · regress.sh · watch.sh · bp_profile.py · bp_regress.py (각 --selftest) · bp_fixture.py (테스트 전용)
 tests/                           pytest — «개발용». 설치처 검증은 --selftest 다
 ```
 
@@ -68,6 +68,8 @@ tests/                           pytest — «개발용». 설치처 검증은 -
 ```sh
 python3 scripts/bugfix_verdict.py --selftest   # 의존 0 — 설치처에서도 이것을 쓴다
 scripts/regress.sh selftest                    # 의존 0 (sh·grep·comm)
+python3 scripts/bp_profile.py --selftest       # 의존 0
+python3 scripts/bp_regress.py --selftest       # 의존 0 (git·sh)
 hooks/install.sh verify                        # 훅이 실제로 불리는지 (설치 후)
 
 # 개발용 pytest — 호스트에 pytest 가 없고, 레포 루트가 import 경로에 없어서 두 옵션이 다 필요하다
