@@ -152,3 +152,12 @@ def test_same_head_with_uncommitted_fix_is_measured_and_marked_dirty(tmp_path):
     out = tmp_path / "out"
     assert run(same, root, out, root=root) == 1
     assert _meta(out)["after_dirty"] == "1"
+
+
+# ── 최종 리뷰 수정 ───────────────────────────────────────────────────────────
+
+
+def test_not_fully_pattern_starting_with_a_dash_still_voids(tmp_path):
+    root, base = bp_fixture.make_host(tmp_path, [], [], {"regress.not_fully": "-*PARTIAL"})
+    bp_fixture.set_mode(root, "partial")
+    assert run(base, root, tmp_path / "out", root=root) == 3

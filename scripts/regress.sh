@@ -27,9 +27,12 @@ _names() {
 _ran_fully() {
   log=$1
   [ -f "$log" ] || return 1
-  grep -qE "$BP_RAN_FULLY" "$log" || return 1
-  if [ -n "$BP_NOT_FULLY" ] && grep -qE "$BP_NOT_FULLY" "$log"; then return 1; fi
-  return 0
+  # -e: `-` 로 시작하는 패턴이 옵션으로 읽히지 않게. 읽을 수 없는 패턴(exit 2)은 «못 쟀다»다
+  grep -qE -e "$BP_RAN_FULLY" "$log" || return 1
+  [ -n "$BP_NOT_FULLY" ] || return 0
+  # `set` 을 건드리지 않는다 — 부르는 쪽의 set +e 구간을 깨면 스크립트가 조용히 죽는다
+  rc=0; grep -qE -e "$BP_NOT_FULLY" "$log" || rc=$?
+  [ "$rc" -eq 1 ]
 }
 
 # _diff <기준선 이름> <수정 후 이름> <기준선 로그> <수정 후 로그> <새 빨강 출력>
@@ -112,10 +115,22 @@ case "$1" in
     saved=$BP_RAN_FULLY; BP_RAN_FULLY=
     _expect 3 "완료 패턴 미지정" "$t/base.txt" "$t/same.txt" "$t/ok.log" "$t/ok.log"
     BP_RAN_FULLY=$saved
+    # 축 6: `-` 로 시작하는 패턴도 «패턴»이다 — grep 옵션으로 읽혀 검사가 꺼지면 안 된다
+    saved=$BP_NOT_FULLY; BP_NOT_FULLY='-*PARTIAL'
+    _expect 3 "- 로 시작하는 not_fully" "$t/base.txt" "$t/same.txt" "$t/ok.log" "$t/partial.log"
+    #   걸리지 않으면 통과여야 한다 — 옵션으로 읽혀 exit 2 가 나면 여기서 3 이 된다
+    _expect 0 "- 로 시작하는 not_fully 안 걸림" "$t/base.txt" "$t/same.txt" "$t/ok.log" "$t/ok.log"
+    BP_NOT_FULLY=$saved; saved_rf=$BP_RAN_FULLY; BP_RAN_FULLY='-*DONE '
+    _expect 0 "- 로 시작하는 ran_fully" "$t/base.txt" "$t/same.txt" "$t/ok.log" "$t/ok.log"
+    BP_RAN_FULLY=$saved_rf
+    # 축 7: grep 이 못 읽는 패턴은 «안 걸림»이 아니라 무효다
+    BP_NOT_FULLY='('
+    _expect 3 "읽을 수 없는 not_fully" "$t/base.txt" "$t/same.txt" "$t/ok.log" "$t/ok.log"
+    BP_NOT_FULLY=$saved
 
     rm -rf "$t"
     [ "$fail" -eq 0 ] || exit 1
-    echo "selftest OK — 다섯 축 전부 통과"
+    echo "selftest OK — 일곱 축(열두 사례) 전부 통과"
     ;;
   *)
     echo "사용법: $0 diff <기준선 이름> <수정 후 이름> <기준선 로그> <수정 후 로그> <새 빨강 출력> | selftest" >&2
