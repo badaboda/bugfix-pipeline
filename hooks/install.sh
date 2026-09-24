@@ -26,6 +26,23 @@ _run_hook() {
 
 case "$1" in
   install)
+    # 🔴 core.hooksPath 가 작업 트리 안(.husky 등)을 가리키면 거기 쓰는 순간 사용자 레포에 파일이 생긴다
+    # (실측 2026-09-25: `?? .husky/`). 공용 git 디렉토리 밖이면서 작업 트리 안이면 거부한다 — 판정은
+    # bp_gate 의 커밋 감사가 하므로 이 훅은 선택이다(스펙 §8).
+    abs_hooks=$(git rev-parse --path-format=absolute --git-path hooks)
+    abs_common=$(git rev-parse --path-format=absolute --git-common-dir)
+    abs_top=$(git rev-parse --show-toplevel)
+    case "$abs_hooks" in
+      /*) ;;
+      *) echo "git 2.31+ 가 필요하다 (--path-format)" >&2; exit 1 ;;
+    esac
+    case "$abs_hooks/" in
+      "$abs_common"/*) ;;
+      "$abs_top"/*)
+        echo "훅 경로가 작업 트리 안이다 — 설치하지 않는다: $abs_hooks" >&2
+        echo "  (RED 규칙은 bp_gate run 의 커밋 감사가 집행한다. 이 훅은 선택이다)" >&2
+        exit 1 ;;
+    esac
     mkdir -p "$hooks_dir"
     if [ -e "$target" ]; then
       echo "이미 commit-msg 훅이 있다: $target" >&2
