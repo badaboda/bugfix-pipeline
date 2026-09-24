@@ -97,3 +97,44 @@ def make_host(tmp, base_failures=(), after_failures=(), overrides=None):
     set_failures(root, after_failures)
     git(root, "commit", "-q", "--allow-empty", "-am", "B")
     return root, base
+
+
+CHECK_SH = """#!/bin/sh
+# 불변식: value.txt 가 good 이고 broken 파일이 없다
+[ "$(cat value.txt)" = good ] && [ ! -e broken ]
+"""
+
+REPRO_SH_TEXT = """#!/bin/sh
+# repro.sh <트리> — 화면 대신 value.txt 를 보인다
+cat "$1/value.txt"
+"""
+
+
+def make_gate_host(tmp, overrides=None):
+    """게이트용 호스트 — value.txt=bad(버그), check.sh(불변식), fake side_cmd, 무시된 작업공간."""
+    tmp = Path(tmp).resolve()
+    root = make_root(tmp, overrides)
+    set_failures(root, [])
+    (root / "value.txt").write_text("bad\n")
+    (root / "check.sh").write_text(CHECK_SH)
+    (root / ".gitignore").write_text(".bugfix-pipeline/\nmode\n")
+    git(root, "init", "-q", "-b", "main")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "base")
+    return root
+
+
+def gate(root, *args) -> int:
+    """cwd 를 root 로 두고 bp_gate.main 을 부른다."""
+    import os
+    import bp_gate
+    prev = os.getcwd()
+    os.chdir(root)
+    try:
+        return bp_gate.main([str(a) for a in args])
+    finally:
+        os.chdir(prev)
+
+
+def ledger(root, slug) -> dict:
+    return json.loads((Path(root) / ".bugfix-pipeline" / slug / "ledger.json").read_text())
