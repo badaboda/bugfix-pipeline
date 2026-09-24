@@ -44,7 +44,8 @@ Claude Code 플러그인 레포다. 버그 수정 요청을 원인 규명 → �
 agents/<name>.md                 frontmatter: name·description·model
 skills/bugfix-pipeline/SKILL.md
 hooks/                           commit-msg · install.sh (git 훅 — Claude Code 이벤트 훅과 다르다)
-scripts/                         bugfix_verdict.py · regress.sh · watch.sh · bp_profile.py · bp_regress.py (각 --selftest) · bp_fixture.py (테스트 전용)
+scripts/                         bugfix_verdict.py · regress.sh · watch.sh · bp_profile.py · bp_regress.py (각 --selftest) · bp_exec_local.py · bp_fixture.py (테스트 전용)
+templates/<스택>/                bp_exec.sh · bp_side.sh · profile.json (실측한 것만 — pytest · vitest)
 tests/                           pytest — «개발용». 설치처 검증은 --selftest 다
 ```
 
