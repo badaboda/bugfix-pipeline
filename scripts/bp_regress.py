@@ -38,6 +38,27 @@ def regress_hash(reg) -> str:
     return h.hexdigest()
 
 
+def _grep(pattern, path) -> int:
+    return subprocess.run(["grep", "-qE", "-e", pattern, str(path)], capture_output=True).returncode
+
+
+def _base_ran_fully(reg, out) -> bool:
+    """regress.sh 의 _ran_fully 와 같은 규칙을 기준선 쪽에만 — 판정 exit 3 은 어느 쪽 탓인지 모른다."""
+    log, names = out / "base.log", out / "base_names.txt"
+    if not (log.is_file() and names.is_file()) or _grep(reg.ran_fully, log) != 0:
+        return False
+    return not reg.not_fully or _grep(reg.not_fully, log) == 1
+
+
+def _store_base(cache, out, meta, reg):
+    cache.mkdir(parents=True, exist_ok=True)
+    for name in _BASE_FILES:
+        shutil.copyfile(out / name, cache / name)
+    base_meta = {k: v for k, v in meta.items() if k.startswith("base_")}
+    base_meta["regress_hash"] = regress_hash(reg)
+    (cache / "META").write_text("".join(f"{k}={v}\n" for k, v in base_meta.items()))
+
+
 def _cached_base(cache, base_head, reg):
     if cache is None or not all((cache / n).is_file() for n in (*_BASE_FILES, "META")):
         return None
@@ -171,16 +192,11 @@ def run(base, after, out, root=None, base_cache=None) -> int:
             meta["base_cached"] = "1"
         else:
             _run_side(reg, "base", base, out, meta, base_head, profile.root)
-            if cache:
-                cache.mkdir(parents=True, exist_ok=True)
-                for name in _BASE_FILES:
-                    if (out / name).is_file():
-                        shutil.copyfile(out / name, cache / name)
-                base_meta = {k: v for k, v in meta.items() if k.startswith("base_")}
-                base_meta["regress_hash"] = regress_hash(reg)
-                (cache / "META").write_text("".join(f"{k}={v}\n" for k, v in base_meta.items()))
         _run_side(reg, "after", after, out, meta, after_head, profile.root)  # 곧바로 — 사이에 아무것도 기다리지 않는다
         code = _judge(reg, out)
+        if cache and not cached and _base_ran_fully(reg, out):
+            # 판정 «뒤», 기준선 쪽이 전수로 돈 것이 확인됐을 때만 — 무효한 기준선을 영구히 재사용하지 않게
+            _store_base(cache, out, meta, reg)
     except _Stop as stop:
         print(str(stop), file=sys.stderr)
         code = stop.code

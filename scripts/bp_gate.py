@@ -41,7 +41,7 @@ CAP = 3
 TRIAGE_RUNS = 3
 LIGHT_REPRO_RUNS = 5
 ENV_FAILED = 125
-EXIT_OK, EXIT_JUDGED, EXIT_CONFIG, EXIT_CAP = 0, 1, 2, 4
+EXIT_OK, EXIT_JUDGED, EXIT_CONFIG, EXIT_UNEXPECTED, EXIT_CAP = 0, 1, 2, 3, 4
 LABEL_NO_DETERMINISM = "결정론 판정 없음"
 LABEL_NO_REGRESS = "회귀 미검증"
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
@@ -111,6 +111,14 @@ def _save(ws, ledger):
     tmp = ws / (LEDGER + ".tmp")
     tmp.write_text(json.dumps(ledger, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     tmp.replace(ws / LEDGER)
+
+
+def _require_clean(root):
+    """게이트는 «커밋된» 트리를 잰다. 커밋 안 된 수정은 감사·변조 검사를 비껴가 PASS 를 만든다(A2 리뷰 실측)."""
+    dirty = _git(root, "status", "--porcelain", "--untracked-files=all", check=True).stdout.strip()
+    if dirty:
+        raise GateError("작업 트리에 커밋 안 된 변경이 있다 — 게이트는 커밋된 트리를 잰다. 커밋하거나 되돌린다:\n"
+                        + "\n".join(f"  {line}" for line in dirty.splitlines()[:10]))
 
 
 def _new_ledger(slug):
@@ -276,8 +284,13 @@ _FEAT_FIX = re.compile(r"^(feat|fix)(\(|!|:)")
 def cmd_baseline(root, a):
     ws = _ws(root, a.slug)
     led = _load(ws)
+    if led["track"] != "formal":
+        raise GateError("기준선은 정식 트랙에서만 잡는다")
     if led["frozen"] is None:
         raise GateError("동결 후에 기준선을 잡는다 — freeze 먼저")
+    if led["baseline_sha"] is not None:
+        # 다시 잡게 두면 변조 흔적(RED 블롭)과 감사 범위를 지울 수 있다(A2 리뷰 실측)
+        raise GateError("기준선은 한 번만 잡는다 — 다시 시작하려면 새 slug 로")
     base = led["base_sha"]
     log = _git(root, "log", "--format=%H", "--reverse", f"{base}..HEAD", "--", *a.red, check=True).stdout.split()
     if not log:
@@ -315,6 +328,12 @@ def _audit_commits(root, led):
         )
         if not ok:
             problems.append(f"{sha[:7]} {subject!r} — 본문에 기준선 이후 다른 커밋의 RED: <sha> 가 없다")
+    # RED «이전»의 수정 커밋은 위 범위 밖이다 — 트리아지 이후 RED 전까지 feat/fix 가 있으면 거부
+    early = _git(root, "log", "--format=%H%x1f%s", f"{led['base_sha']}..{base}", check=True).stdout
+    for line in early.splitlines():
+        sha, subject = (line.split("\x1f") + [""])[:2]
+        if _FEAT_FIX.match(subject):
+            problems.append(f"{sha[:7]} {subject!r} — RED 커밋보다 먼저 들어간 수정이다")
     if problems:
         raise GateError("커밋 감사:\n" + "\n".join(f"  - {p}" for p in problems))
 
@@ -357,8 +376,14 @@ def cmd_refreeze(root, a):
              "from_cause": led["cause_id"], "to_cause": cause_id}
     if cause_id != led["cause_id"]:
         led["cause_changes"].append(entry)
+    entry["changed"] = sorted(k for k in set(frozen) | set(led["frozen"]) if frozen.get(k) != led["frozen"].get(k))
     if a.refund_last:
+        if not entry["changed"]:
+            # 아무것도 안 바뀐 재동결로 cap 을 되돌리면 cap 이 무한이 된다(A2 리뷰 실측)
+            raise GateError("환불은 측정을 고친 재동결에서만 — 동결 파일이 하나도 바뀌지 않았다")
         _refund_last(led, entry)
+        if led["phase"] == "DEFERRED" and led["code_count"] < CAP:
+            led["phase"] = "P5"
     led["history"].append(entry)
     led.update(cause_id=cause_id, frozen=frozen)
     _save(ws, led)
@@ -377,7 +402,7 @@ def _refund_last(led, entry):
 
 def _run_repro(profile, root, ws, tree):
     argv = bp_profile.exec_argv(profile, tree, ["sh", str(ws / REPRO_SH), str(tree)])
-    r = subprocess.run(argv, cwd=str(root), capture_output=True, text=True)
+    r = subprocess.run(argv, cwd=str(root), capture_output=True, text=True, errors="replace")
     return r.returncode, r.stdout + r.stderr
 
 
@@ -427,6 +452,8 @@ def cmd_promote(root, a):
     led = _load(ws)
     if led["track"] != "light":
         raise GateError("가벼운 트랙이 아니다")
+    if led["phase"] == "DEFERRED":
+        raise GateError("DEFERRED — cap 에 도달한 버그는 트랙을 바꿔 계속하지 않는다")
     t = led["triage"]
     if not (t["deterministic"] and t["suite"]):
         raise GateError("정식 트랙의 전제(결정적 재현 · 스위트)가 없다 — 승급하지 않고 GATE L 에서 사용자에게 올린다")
@@ -442,6 +469,9 @@ def cmd_to_light(root, a):
     led = _load(ws)
     if led["track"] != "formal":
         raise GateError("정식 트랙이 아니다")
+    if led["phase"] == "DEFERRED":
+        # cap 을 가벼운 트랙으로 빠져나가면 표지 없는 PR 이 된다(A2 리뷰 실측)
+        raise GateError("DEFERRED — cap 에 도달한 버그는 트랙을 바꿔 계속하지 않는다")
     _change_track(led, "light", a.reason, a.kind)
     led["phase"] = "L1"
     _save(ws, led)
@@ -461,7 +491,10 @@ def _copy_parent(profile):
 @contextmanager
 def _copy(root, profile, rev):
     """레포 «밖»에 rev 의 git worktree 사본 — 루트 쪽 스위트가 사본 테스트를 수집하지 않게. 늘 폐기."""
-    parent = tempfile.mkdtemp(prefix="bp-copy-", dir=_copy_parent(profile))
+    try:
+        parent = tempfile.mkdtemp(prefix="bp-copy-", dir=_copy_parent(profile))
+    except OSError as e:
+        raise _CopyFailed(f"사본 자리를 만들지 못했다: {e}")
     path = Path(parent) / "tree"
     try:
         r = _git(root, "worktree", "add", "-q", "--detach", str(path), rev)
@@ -525,13 +558,16 @@ def _mutate(root, ws, led, copy_path, m):
 
 def _exec_hash(profile):
     h = hashlib.sha256(repr(profile.exec_cmd).encode())
-    if profile.exec_cmd and Path(profile.exec_cmd[0]).is_file():
-        h.update(Path(profile.exec_cmd[0]).read_bytes())
+    wrapper = Path(profile.exec_cmd[0]) if profile.exec_cmd else HERE / "bp_exec_local.py"
+    if wrapper.is_file():
+        h.update(wrapper.read_bytes())
     return h.hexdigest()
 
 
 def _control_cached(profile, root, ws, led, rub, rundir):
-    key = f"{_head(root)}:{led['frozen'][RUBRIC]}:{_exec_hash(profile)}"
+    # 키: 측정을 바꾸는 것 전부 — HEAD · 동결 집합 전체(patch · repro.sh 포함) · @baseline 이 가리킬 sha · exec
+    frozen = hashlib.sha256(json.dumps(led["frozen"], sort_keys=True).encode()).hexdigest()
+    key = f"{_head(root)}:{frozen}:{led['baseline_sha']}:{_exec_hash(profile)}"
     path = ws / "control_cache.json"
     if path.is_file():
         c = json.loads(path.read_text())
@@ -612,6 +648,7 @@ def cmd_run(root, a):
     profile = _profile(root)
     if profile.regress is None:
         raise GateError("regress 섹션이 없다 — 정식 트랙은 스위트가 필요하다")
+    _require_clean(root)
     _check_tamper(root, ws, led)
     _audit_commits(root, led)
     rub = json.loads((ws / RUBRIC).read_text(encoding="utf-8"))
@@ -666,8 +703,9 @@ def cmd_light_verify(root, a):
     head, base = _head(root), led["base_sha"]
     if head == base:
         raise GateError("수정 커밋이 없다 — 가벼운 트랙도 «커밋된» 트리를 잰다")
+    _require_clean(root)
     vdir = ws / f"light_{len(led['light_verifications']) + 1}"
-    vdir.mkdir()
+    vdir.mkdir(exist_ok=True)  # 중단된 지난 시도의 잔해 — 이번 결과로 덮어쓴다
     observed = _repro_fields(ws).get("observed", "")
     rec = {"head": head, "at": _now(), "repro": None, "regress": None}
     if (ws / REPRO_SH).is_file() and observed:
@@ -713,8 +751,8 @@ def _light_labels(led):
     clean = bool(
         repro and repro["mode"] == "deterministic"
         and repro["before_observed"] and repro["before_exit"] != ENV_FAILED
-        and not repro["after_observed"] and repro["after_exit"] != ENV_FAILED
-    )
+        and not repro["after_observed"] and repro["after_exit"] in (0, repro["before_exit"])
+    )  # 수정 후 재현이 «죽어서» observed 가 안 나온 것은 고쳐진 것이 아니다(A2 리뷰 실측)
     unstable = any(c["to"] == "light" and c["kind"] in ("cannot-measure", "unstable") for c in led["track_changes"])
     labels = []
     if not clean or unstable:
@@ -895,6 +933,12 @@ def main(argv) -> int:
     except GateError as e:
         print(str(e), file=sys.stderr)
         return e.code
+    except Exception:
+        # 마지막 방어선 — 예상 못 한 예외가 exit 1(«판정이 PASS 아님»)로 읽히지 않게
+        import traceback
+        traceback.print_exc()
+        print("bp_gate: 예상 못 한 예외", file=sys.stderr)
+        return EXIT_UNEXPECTED
 
 
 if __name__ == "__main__":

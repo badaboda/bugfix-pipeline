@@ -16,25 +16,27 @@ python3 <플러그인>/scripts/bp_gate.py --selftest
 | `init <slug>` | 공통 P0 | `.bugfix-pipeline/` 가 git 무시 경로 · 진행 중인 다른 slug 없음 | 작업공간 · `ledger.json` · `repro.md` 양식 |
 | `triage <slug> [--light] [--repro-confirmed]` | 공통 P0 | 아직 트리아지 전. `repro.sh` 가 있으면 `--repro-confirmed` 필수 | 재현 3 회 · 스위트 유무 · `--light` → 트랙. 이때의 HEAD 가 `base_sha` |
 | `freeze <slug>` | 정식 GATE 1 | 정식 트랙 · 동결 전 | `rubric.json`·`root_cause.json`·`repro.md` 검사 → 동결 해시 |
-| `refreeze <slug> --reason R [--refund-last]` | 정식 GATE 1 재진입 | 동결 후 | 재동결 · `cause_id` 가 바뀌면 원인 교체 이력 · `--refund-last` 는 직전 `CODE` 환불(사용자 승인) |
-| `baseline <slug> --red F…` | 정식 P2 | 동결 후 | 첫 RED 커밋의 부모 = 기준선 sha · RED 파일 blob 해시 |
+| `refreeze <slug> --reason R [--refund-last]` | 정식 GATE 1 재진입 | 동결 후 | 재동결 · `cause_id` 가 바뀌면 원인 교체 이력 · `--refund-last` 는 직전 `CODE` 환불(사용자 승인) — **동결 파일이 하나 이상 바뀌어야** 하고, `DEFERRED` 에서 cap 아래로 내려가면 단계를 P5 로 되돌린다 |
+| `baseline <slug> --red F…` | 정식 P2 | 정식 트랙 · 동결 후 · **아직 기준선 없음**(한 번만) | 첫 RED 커밋의 부모 = 기준선 sha · RED 파일 blob 해시 |
 | `run <slug>` | 정식 P5 | 정식 · 동결 · 기준선 · cap 미도달 | 아래 |
 | `record-sweep <slug> --regression F` | 정식 P5b | 정식 · 동결 · 근거 파일이 작업공간 안 | 진리표에 `regress=False` → `CODE` +1 |
-| `promote <slug> --reason R` | 가벼운 → 정식 | 트리아지가 결정적 · 스위트 있음 | 승급, 단계 P1 |
-| `to-light <slug> --kind K --reason R` | 정식 → 가벼운 | 정식 트랙 | `K` = `cannot-measure` · `unstable` · `size` |
-| `light-verify <slug>` | 가벼운 | 수정 커밋이 있음 | 재현 축 · 회귀 축을 **직접 실행**해 기록 |
+| `promote <slug> --reason R` | 가벼운 → 정식 | 트리아지가 결정적 · 스위트 있음 · `DEFERRED` 아님 | 승급, 단계 P1 |
+| `to-light <slug> --kind K --reason R` | 정식 → 가벼운 | 정식 트랙 · `DEFERRED` 아님(cap 을 트랙 변경으로 빠져나가지 않는다) | `K` = `cannot-measure` · `unstable` · `size` |
+| `light-verify <slug>` | 가벼운 | 수정 커밋이 있음 · **작업 트리가 깨끗함** | 재현 축 · 회귀 축을 **직접 실행**해 기록 |
 | `light-report <slug>` | 가벼운 | 마지막 검증 이후 커밋 없음 | 표지 계산 → `light_report.md`(로컬) · `pr_body.md` |
 | `status <slug> [--close done\|abandoned] [--pr-body]` | 공통 | — | 요약 · 종료 기록 · 정식 PR 본문 |
 
 종료코드: `0` 성공(`run` 은 PASS) · `1` `run`/`record-sweep` 판정이 PASS 아님 · `2` 설정 오류·변조·감사 실패 ·
-`4` cap 도달(`DEFERRED`).
+`3` 예상 못 한 예외(판정이 아니다) · `4` cap 도달(`DEFERRED`).
 
 ## `run`
 
+0. **깨끗한 작업 트리** — 커밋 안 된 변경(추적 · 미추적, 무시 경로 제외)이 있으면 2. 게이트는 «커밋된» 트리를 잰다 —
+   커밋 안 된 수정은 감사와 변조 검사를 비껴가 PASS 를 만든다.
 1. **변조 검사** — 동결 파일(`rubric.json` · `root_cause.json` · `repro.md` · `repro.sh` · patch) sha256 와 RED 파일
    blob 해시. 다르면 2.
 2. **커밋 감사** — `기준선..HEAD` 의 `feat`·`fix` 커밋은 **모두** 본문에 `RED: <기준선 이후 다른 커밋 sha>` 가 있어야
-   한다. 없으면 2. git 훅이 없어도 이것이 RED 규칙을 집행한다.
+   한다. 없으면 2. git 훅이 없어도 이것이 RED 규칙을 집행한다. 트리아지 이후 RED 커밋 «전»에 들어간 `feat`·`fix` 도 2.
 3. `R-CONTROL` → `R-CAUSE` → `R-SYMPTOM` → `R-REGRESS`. FAIL 이면 멈추고 뒤 행은 `None`. probe exit 125 ·
    사본·변이 실패 · `bp_regress` 2/3 → `probe_ok=False`(ENV).
 4. `verdict()` → `code_count += cap_delta` → `verdict_<n>.json`. `code_count` 가 3 이 되면 그 자리에서 `DEFERRED` · 4.
@@ -56,8 +58,8 @@ python3 <플러그인>/scripts/bp_gate.py --selftest
 
 | 캐시 | 키 | 무효 |
 |---|---|---|
-| `control_cache.json` | HEAD · 동결 루브릭 해시 · `exec` 해시(래퍼 내용 포함) | 새 커밋 · 루브릭 재동결 · 래퍼 변경 |
-| `baseline_cache/<sha>/` | 기준선 sha · `regress` 해시(설정 + `side_cmd` 래퍼 내용) | 프로파일 `regress` 나 래퍼 변경 |
+| `control_cache.json` | HEAD · 동결 집합 전체 해시(patch · `repro.sh` 포함) · 기준선 sha · `exec` 해시(래퍼 또는 `bp_exec_local.py` 내용) | 새 커밋 · 재동결 · 래퍼 변경 |
+| `baseline_cache/<sha>/` | 기준선 sha · `regress` 해시(설정 + `side_cmd` 래퍼 내용) | 프로파일 `regress` 나 래퍼 변경. **기준선 쪽이 전수로 돈 실행만** 저장한다 |
 
 ## 작업공간 파일
 
@@ -95,7 +97,7 @@ python3 <플러그인>/scripts/bp_gate.py --selftest
 
 | 표지 | 붙는 조건 |
 |---|---|
-| `결정론 판정 없음` | 마지막 검증에 «수정 전 재현 · 수정 후 사라짐»이 결정적으로 없음 · 또는 `to-light --kind cannot-measure\|unstable` 이력 |
+| `결정론 판정 없음` | 마지막 검증에 «수정 전 재현 · 수정 후 사라짐»이 결정적으로 없음(수정 후 재현의 exit 가 0 도, 수정 전 exit 도 아니면 «죽은» 것으로 본다) · 또는 `to-light --kind cannot-measure\|unstable` 이력 |
 | `회귀 미검증` | 마지막 검증에 회귀 축이 없음(`regress` 섹션 없음) 또는 측정 무효 |
 
 ## PR 본문 위생

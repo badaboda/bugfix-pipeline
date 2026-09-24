@@ -105,6 +105,8 @@ def test_refund_last_code_needs_a_code(tmp_path):
     root, ws, red = _at_p3(tmp_path)
     assert gate(root, "refreeze", "b1", "--reason", "측정 결함", "--refund-last") == 2
     gate(root, "run", "b1")
+    # 환불은 측정을 고친 재동결에서만 — 동결 파일 하나를 실제로 고친다(A2 리뷰 I2)
+    (ws / "repro.md").write_text((ws / "repro.md").read_text().replace("where: 로컬", "where: 로컬 (보정)"))
     assert gate(root, "refreeze", "b1", "--reason", "측정 결함", "--refund-last") == 0
     led = ledger(root, "b1")
     assert led["code_count"] == 0 and led["history"][0]["refunded"]
