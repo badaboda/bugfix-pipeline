@@ -48,17 +48,17 @@ def _inside(path, roots) -> bool:
     return not roots or any(path == r or r in path.parents for r in roots)
 
 
-def _preflight(profile, base, after, out):
+def _preflight(reg, base, after, out):
     """검사를 통과하면 방향을 잰 (기준선 HEAD, 수정 후 HEAD) 를 돌려준다."""
     for tree in (base, after):
         if not tree.is_dir():
             raise _Stop(EXIT_CONFIG, f"설정 오류: 트리가 없다 — {tree}")
     for p in (base, after, out):
-        if not _inside(p, profile.allowed_roots):
+        if not _inside(p, reg.allowed_roots):
             raise _Stop(EXIT_CONFIG, f"설정 오류: allowed_roots 밖이다 — {p}")
     base_head, after_head = _head(base), _head(after)
     for tree in (base, after):
-        marker = tree / profile.tree_marker
+        marker = tree / reg.tree_marker
         if not marker.exists():
             # 빈 마운트 지점·엉뚱한 트리 — 러너 부재가 «빨강»처럼 읽히는 것을 막는다
             raise _Stop(EXIT_VOID, f"측정 무효: tree_marker 가 없다 — {marker}")
@@ -77,7 +77,7 @@ def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S")
 
 
-def _run_side(profile, side, tree, out, meta, checked_head) -> None:
+def _run_side(reg, side, tree, out, meta, checked_head, root) -> None:
     names, log = out / f"{side}_names.txt", out / f"{side}.log"
     before = _head(tree)
     if before != checked_head:
@@ -90,8 +90,8 @@ def _run_side(profile, side, tree, out, meta, checked_head) -> None:
         # 쪽 표지를 넘기지 않는다 — 래퍼가 쪽마다 다르게 굴 수 없게
         try:
             subprocess.run(
-                [*profile.side_cmd, str(tree), str(names)],
-                cwd=str(profile.root), stdout=f, stderr=subprocess.STDOUT,
+                [*reg.side_cmd, str(tree), str(names)],
+                cwd=str(root), stdout=f, stderr=subprocess.STDOUT,
             )
         except OSError as e:
             raise _Stop(EXIT_CONFIG, f"설정 오류: side_cmd 를 실행할 수 없다 — {e}")
@@ -104,11 +104,11 @@ def _run_side(profile, side, tree, out, meta, checked_head) -> None:
         raise _Stop(EXIT_VOID, f"측정 무효: 측정 중 {side} 트리의 HEAD 가 바뀌었다 — {before} → {after}")
 
 
-def _judge(profile, out) -> int:
+def _judge(reg, out) -> int:
     env = dict(os.environ)
     # 호출자 셸의 값이 새어 들지 않게 둘 다 «명시»한다 — 프로파일에 없으면 빈 값
-    env["BP_RAN_FULLY"] = profile.ran_fully
-    env["BP_NOT_FULLY"] = profile.not_fully or ""
+    env["BP_RAN_FULLY"] = reg.ran_fully
+    env["BP_NOT_FULLY"] = reg.not_fully or ""
     r = subprocess.run(
         ["sh", str(HERE / "regress.sh"), "diff", *(str(out / n) for n in _DIFF_FILES)], env=env
     )
@@ -125,8 +125,14 @@ def run(base, after, out, root=None) -> int:
             profile = bp_profile.load(root)
         except bp_profile.ProfileError as e:
             raise _Stop(EXIT_CONFIG, "설정 오류: 프로파일\n" + "\n".join(f"  - {p}" for p in e.problems))
+        reg = profile.regress
+        if reg is None:
+            raise _Stop(
+                EXIT_CONFIG,
+                "설정 오류: 프로파일에 regress 섹션이 없다 — R-REGRESS 는 테스트 스위트가 있는 프로젝트에서만 잰다",
+            )
         base, after = Path(base).resolve(), Path(after).resolve()
-        base_head, after_head = _preflight(profile, base, after, out)
+        base_head, after_head = _preflight(reg, base, after, out)
         try:
             out.mkdir(parents=True, exist_ok=True)
         except OSError as e:
@@ -134,10 +140,10 @@ def run(base, after, out, root=None) -> int:
         for name in _DIFF_FILES:
             # 지난 실행의 산출물을 «이번 결과»로 읽지 않는다
             (out / name).unlink(missing_ok=True)
-        meta["side_cmd"] = " ".join(profile.side_cmd)
-        _run_side(profile, "base", base, out, meta, base_head)
-        _run_side(profile, "after", after, out, meta, after_head)  # 곧바로 — 사이에 아무것도 기다리지 않는다
-        code = _judge(profile, out)
+        meta["side_cmd"] = " ".join(reg.side_cmd)
+        _run_side(reg, "base", base, out, meta, base_head, profile.root)
+        _run_side(reg, "after", after, out, meta, after_head, profile.root)  # 곧바로 — 사이에 아무것도 기다리지 않는다
+        code = _judge(reg, out)
     except _Stop as stop:
         print(str(stop), file=sys.stderr)
         code = stop.code
@@ -204,7 +210,7 @@ def _case_outside_roots(tmp):
 
 def _case_bad_profile(tmp):
     root, base = bp_fixture.make_host(tmp, [], [])
-    bp_fixture.write_profile(root, {"schema": 2})
+    bp_fixture.write_profile(root, {"schema": 3})
     return root, base, root
 
 

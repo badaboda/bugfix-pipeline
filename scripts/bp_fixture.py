@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path
 
 PROFILE_DEFAULTS = {
-    "schema": 1,
+    "schema": 2,
     "regress": {
         "side_cmd": ["bin/side.sh"],
         "ran_fully": "^DONE ",
@@ -40,8 +40,9 @@ def write_profile(root, overrides=None) -> None:
     """overrides: {"schema": 2} · {"regress.not_fully": "x"} · 값이 None 이면 그 키를 뺀다."""
     data = json.loads(json.dumps(PROFILE_DEFAULTS))
     for key, value in (overrides or {}).items():
-        if key.startswith("regress."):
-            parent, name = data["regress"], key.split(".", 1)[1]
+        if "." in key:
+            section, name = key.split(".", 1)
+            parent = data.setdefault(section, {})
         else:
             parent, name = data, key
         if value is None:

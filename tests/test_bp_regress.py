@@ -124,7 +124,7 @@ def test_early_stop_overwrites_a_stale_exit_file(tmp_path):
     root, base = bp_fixture.make_host(tmp_path, [], [])
     out = tmp_path / "out"
     assert run(base, root, out, root=root) == 0
-    bp_fixture.write_profile(root, {"schema": 2})
+    bp_fixture.write_profile(root, {"schema": 3})
     assert run(base, root, out, root=root) == 2
     assert (out / "EXIT").read_text() == "2\n"
 
@@ -200,3 +200,9 @@ def test_after_tree_moved_while_the_base_side_runs_is_void(tmp_path):
     bp_fixture.set_mode(base, "commit_other")  # 기준선 쪽 실행 중에 수정 후 트리에 커밋
     (base / "other").write_text(str(root))
     assert run(base, root, tmp_path / "out", root=root) == 3
+
+
+def test_missing_regress_section_is_a_config_error(tmp_path):
+    root, base = bp_fixture.make_host(tmp_path, [], [])
+    bp_fixture.write_profile(root, {"regress": None})
+    assert run(base, root, tmp_path / "out", root=root) == 2
