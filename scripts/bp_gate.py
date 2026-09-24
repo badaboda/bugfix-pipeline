@@ -25,6 +25,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import bp_profile  # noqa: E402
+import bp_regress  # noqa: E402
+from bugfix_verdict import Attribution, verdict  # noqa: E402
 
 WORKSPACE_DIR = ".bugfix-pipeline"
 LEDGER = "ledger.json"
@@ -365,7 +367,12 @@ def cmd_refreeze(root, a):
 
 
 def _refund_last(led, entry):
-    raise GateError("환불은 Task 5 에서")
+    last = next((h for h in reversed(led["history"]) if h.get("kind") in ("run", "sweep")), None)
+    if not last or last["attribution"] != "CODE" or last.get("refunded"):
+        raise GateError("직전 판정이 환불 가능한 CODE 가 아니다")
+    last["refunded"] = True
+    led["code_count"] -= 1
+    entry["refunded"] = last["n"]
 
 
 def _run_repro(profile, root, ws, tree):
@@ -442,6 +449,178 @@ def cmd_to_light(root, a):
     return EXIT_OK
 
 
+class _CopyFailed(Exception):
+    pass
+
+
+def _copy_parent(profile):
+    roots = profile.regress.allowed_roots if profile.regress else ()
+    return str(roots[0]) if roots else None
+
+
+@contextmanager
+def _copy(root, profile, rev):
+    """레포 «밖»에 rev 의 git worktree 사본 — 루트 쪽 스위트가 사본 테스트를 수집하지 않게. 늘 폐기."""
+    parent = tempfile.mkdtemp(prefix="bp-copy-", dir=_copy_parent(profile))
+    path = Path(parent) / "tree"
+    try:
+        r = _git(root, "worktree", "add", "-q", "--detach", str(path), rev)
+        if r.returncode:
+            raise _CopyFailed(f"사본을 만들지 못했다({rev}): {r.stderr.strip()}")
+        yield path
+    finally:
+        _git(root, "worktree", "remove", "--force", str(path))
+        _git(root, "worktree", "prune")
+        shutil.rmtree(parent, ignore_errors=True)
+
+
+def _exec_prefix(profile):
+    if profile.exec_cmd:
+        return list(profile.exec_cmd)
+    return [sys.executable, str(HERE / "bp_exec_local.py")]
+
+
+def _expand(argv, profile, tree, out, ws):
+    res = []
+    for tok in argv:
+        if tok == "{exec}":
+            res.extend(_exec_prefix(profile))
+            continue
+        res.append(tok.replace("{tree}", str(tree)).replace("{out}", str(out)).replace("{repro}", str(ws / REPRO_SH)))
+    return res
+
+
+def _run_row(profile, root, ws, row, tree, out):
+    """(ran, passed, record). ran=False 는 «돌지 못했다»(125 · 실행 실패) — probe_ok=False."""
+    probe = _expand(row["probe"], profile, tree, out, ws)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, "wb") as f:
+        try:
+            pr = subprocess.run(probe, cwd=str(root), stdout=f, stderr=subprocess.STDOUT).returncode
+        except OSError as e:
+            f.write(str(e).encode())
+            pr = ENV_FAILED
+    rec = {"probe": probe, "probe_exit": pr, "out": str(out)}
+    if pr == ENV_FAILED:
+        return False, None, rec
+    if "assert" not in row:
+        return True, pr == 0, rec
+    argv = _expand(row["assert"], profile, tree, out, ws)
+    try:
+        ar = subprocess.run(argv, cwd=str(root), capture_output=True).returncode
+    except OSError:
+        ar = ENV_FAILED
+    rec.update(assert_argv=argv, assert_exit=ar)
+    if ar == ENV_FAILED:
+        return False, None, rec
+    return True, ar == 0, rec
+
+
+def _mutate(root, ws, led, copy_path, m):
+    if "patch" in m:
+        return _git(copy_path, "apply", str(ws / m["patch"])).returncode == 0
+    ref = led["baseline_sha"] if m["checkout"] == BASELINE_REF else m["checkout"]
+    return _git(copy_path, "checkout", "-q", "--detach", ref).returncode == 0
+
+
+def _control(profile, root, ws, led, rub, rundir):
+    """축마다 사본 → 변이 → R-CAUSE → 폐기. 변이 후 R-CAUSE 가 빨개지고 alive 는 초록이어야 축 통과."""
+    axes = []
+    for i, ax in enumerate(rub["R-CONTROL"]["axes"]):
+        try:
+            with _copy(root, profile, "HEAD") as cp:
+                if not _mutate(root, ws, led, cp, ax["mutate"]):
+                    return False, None, {"axes": axes, "failed": ax["name"], "why": "변이를 적용하지 못했다"}
+                ran, passed, rec = _run_row(profile, root, ws, rub["R-CAUSE"], cp, rundir / f"control_{i}.out")
+                if not ran:
+                    return False, None, {"axes": axes, "failed": ax["name"], "record": rec}
+                alive = True
+                if "alive" in ax:
+                    a_ran, a_pass, _ = _run_row(profile, root, ws, {"probe": ax["alive"]}, cp, rundir / f"alive_{i}.out")
+                    if not a_ran:
+                        return False, None, {"axes": axes, "failed": ax["name"], "why": "alive 가 돌지 못했다"}
+                    alive = a_pass
+                axes.append({"name": ax["name"], "cause_red": not passed, "alive": alive})
+        except _CopyFailed as e:
+            return False, None, {"axes": axes, "failed": ax["name"], "why": str(e)}
+    return True, all(a["cause_red"] and a["alive"] for a in axes), {"axes": axes}
+
+
+def _regress(profile, root, ws, led, rundir):
+    try:
+        with _copy(root, profile, led["baseline_sha"]) as base:
+            code = bp_regress.run(base, root, rundir / "regress", root=root)
+    except _CopyFailed as e:
+        return False, None, {"why": str(e)}
+    rec = {"exit": code, "out": str(rundir / "regress")}
+    if code not in (0, 1):
+        return False, None, rec
+    return True, code == 0, rec
+
+
+_NEXT_PHASE = {"PASS": "P5b", "CODE": "P3", "ANCHOR": "P2", "VOID": "P5", "ENV": "P5"}
+
+
+def _judge(ws, led, head, args, rows, kind):
+    v = verdict(**args)
+    n = len([h for h in led["history"] if h.get("kind") in ("run", "sweep")]) + 1
+    led["code_count"] += v.cap_delta
+    entry = {"kind": kind, "n": n, "at": _now(), "head": head, "cause_id": led["cause_id"],
+             "attribution": v.attribution.value, "cap_delta": v.cap_delta, "reason": v.reason, "args": args}
+    led["history"].append(entry)
+    (ws / f"verdict_{n}.json").write_text(
+        json.dumps({**entry, "rows": rows}, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    code = EXIT_OK if v.attribution is Attribution.PASS else EXIT_JUDGED
+    if led["code_count"] >= CAP:
+        led["phase"] = "DEFERRED"
+        code = EXIT_CAP
+    else:
+        led["phase"] = _NEXT_PHASE[v.attribution.value]
+    _save(ws, led)
+    print(f"ATTRIBUTION={v.attribution.value} — {v.reason} · loop {led['code_count']}/{CAP} · phase {led['phase']}")
+    return code
+
+
+def cmd_run(root, a):
+    ws = _ws(root, a.slug)
+    led = _load(ws)
+    if led["track"] != "formal" or led["frozen"] is None or led["baseline_sha"] is None:
+        raise GateError("run 은 정식 트랙 · 동결 · 기준선 이후에")
+    if led["phase"] == "DEFERRED" or led["code_count"] >= CAP:
+        raise GateError(f"cap 도달 ({led['code_count']}/{CAP}) — DEFERRED", EXIT_CAP)
+    profile = _profile(root)
+    if profile.regress is None:
+        raise GateError("regress 섹션이 없다 — 정식 트랙은 스위트가 필요하다")
+    _check_tamper(root, ws, led)
+    _audit_commits(root, led)
+    rub = json.loads((ws / RUBRIC).read_text(encoding="utf-8"))
+    head = _head(root)
+    n = len([h for h in led["history"] if h.get("kind") in ("run", "sweep")]) + 1
+    rundir = ws / f"run_{n}"
+    rundir.mkdir(exist_ok=True)
+    args = {"probe_ok": True, "control": None, "cause": None, "symptom": None, "regress": None}
+    rows = {}
+    steps = [
+        ("R-CONTROL", "control", lambda: _control(profile, root, ws, led, rub, rundir)),
+        ("R-CAUSE", "cause", lambda: _run_row(profile, root, ws, rub["R-CAUSE"], root, rundir / "cause.out")),
+        ("R-SYMPTOM", "symptom", lambda: _run_row(profile, root, ws, rub["R-SYMPTOM"], root, rundir / "symptom.out")),
+        ("R-REGRESS", "regress", lambda: _regress(profile, root, ws, led, rundir)),
+    ]
+    for name, key, step in steps:
+        ran, passed, rec = step()
+        rows[name] = rec
+        if not ran:
+            args["probe_ok"] = False
+            break
+        args[key] = passed
+        if not passed:
+            break
+    code = _judge(ws, led, head, args, rows, "run")
+    if args["regress"] is False:
+        print(f"  새 빨강: {rundir / 'regress' / 'new_red.txt'} — 원인과 무관해 보이면 SPEC 으로 GATE 1 재진입(사용자 판단)")
+    return code
+
+
 def cmd_status(root, a):
     ws = _ws(root, a.slug)
     led = _load(ws)
@@ -484,12 +663,15 @@ def _parser():
     s = sub.add_parser("baseline")
     s.add_argument("slug")
     s.add_argument("--red", nargs="+", required=True)
+    s = sub.add_parser("run")
+    s.add_argument("slug")
     return p
 
 
 COMMANDS = {"init": cmd_init, "status": cmd_status, "triage": cmd_triage,
             "promote": cmd_promote, "to-light": cmd_to_light,
-            "freeze": cmd_freeze, "refreeze": cmd_refreeze, "baseline": cmd_baseline}
+            "freeze": cmd_freeze, "refreeze": cmd_refreeze, "baseline": cmd_baseline,
+            "run": cmd_run}
 
 
 def main(argv) -> int:
