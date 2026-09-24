@@ -45,6 +45,7 @@ ENV_FAILED = 125
 EXIT_OK, EXIT_JUDGED, EXIT_CONFIG, EXIT_UNEXPECTED, EXIT_CAP = 0, 1, 2, 3, 4
 LABEL_NO_DETERMINISM = "결정론 판정 없음"
 LABEL_NO_REGRESS = "회귀 미검증"
+LABEL_NO_BASELINE_REPRO = "기준선 미재현"
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _CLOSED = {"done", "abandoned"}
 REPRO_TEMPLATE = """# 재현 — {slug}
@@ -52,6 +53,8 @@ REPRO_TEMPLATE = """# 재현 — {slug}
 steps:
 observed:
 where:
+needs_ui:
+url:
 expected_after:
 """
 
@@ -138,7 +141,7 @@ def _repro_fields(ws):
         raise GateError(f"repro.md 가 없다: {path}")
     fields = {}
     for line in path.read_text(encoding="utf-8").splitlines():
-        m = re.match(r"^(steps|observed|where|expected_after):\s*(.*)$", line)
+        m = re.match(r"^(steps|observed|where|needs_ui|url|expected_after):\s*(.*)$", line)
         if m:
             fields[m.group(1)] = m.group(2).strip()
     return fields
@@ -402,10 +405,32 @@ def _refund_last(led, entry):
     entry["refunded"] = last["n"]
 
 
-def _run_repro(profile, root, ws, tree):
-    argv = bp_profile.exec_argv(profile, tree, ["sh", str(ws / REPRO_SH), str(tree)])
+def _needs_ui(ws):
+    return _repro_fields(ws).get("needs_ui", "").lower() in ("yes", "true", "1", "예")
+
+
+def _repro_exec(profile, root, ws, tree, extra):
+    argv = bp_profile.exec_argv(profile, tree, ["sh", str(ws / REPRO_SH), str(tree), *extra])
     r = subprocess.run(argv, cwd=str(root), capture_output=True, text=True, errors="replace")
     return r.returncode, r.stdout + r.stderr
+
+
+def _run_repro(profile, root, ws, tree, allow_user_url=False):
+    """repro.sh <트리> [<URL>]. 화면 재현이면 그 트리로 앱을 띄운다. ui 가 없으면 사용자 URL 은 현재 트리에만."""
+    if not _needs_ui(ws):
+        return _repro_exec(profile, root, ws, tree, [])
+    if profile.ui is not None:
+        logdir = ws / "serve"
+        logdir.mkdir(exist_ok=True)
+        try:
+            with bp_ui.serve(profile, tree, logdir / f"{time.strftime('%H%M%S')}-{tree.name}.log") as url:
+                return _repro_exec(profile, root, ws, tree, [url])
+        except bp_ui.UiError as e:
+            return ENV_FAILED, f"화면 서버: {e}"
+    url = _repro_fields(ws).get("url", "")
+    if not (allow_user_url and url):
+        return ENV_FAILED, "화면이 필요한 재현인데 ui 가 없다 — 사용자 URL 은 현재 트리에만 쓴다"
+    return _repro_exec(profile, root, ws, tree, [url])
 
 
 def cmd_triage(root, a):
@@ -421,12 +446,13 @@ def cmd_triage(root, a):
     runs = []
     if has_sh and observed:
         for _ in range(TRIAGE_RUNS):
-            code, out = _run_repro(profile, root, ws, root)
+            code, out = _run_repro(profile, root, ws, root, allow_user_url=True)
             runs.append({"exit": code, "observed": observed in out})
     deterministic = (
         bool(runs)
         and all(r["observed"] and r["exit"] != ENV_FAILED for r in runs)
         and len({r["exit"] for r in runs}) == 1
+        and not (_needs_ui(ws) and profile.ui is None)
     )
     suite = profile.regress is not None
     track = "formal" if deterministic and suite and not a.light else "light"
@@ -729,7 +755,12 @@ def cmd_light_verify(root, a):
     observed = _repro_fields(ws).get("observed", "")
     rec = {"head": head, "at": _now(), "repro": None, "regress": None}
     if (ws / REPRO_SH).is_file() and observed:
-        if led["triage"]["deterministic"]:
+        if _needs_ui(ws) and profile.ui is None:
+            # 사용자 서버는 작업 트리만 서빙한다 — 기준선은 잴 수 없다(스펙 §3.1)
+            a_exit, a_out = _run_repro(profile, root, ws, root, allow_user_url=True)
+            (vdir / "repro_after.out").write_text(a_out)
+            rec["repro"] = {"mode": "after-only", "after_exit": a_exit, "after_observed": observed in a_out}
+        elif led["triage"]["deterministic"]:
             try:
                 with _copy(root, profile, base) as cp:
                     b_exit, b_out = _run_repro(profile, root, ws, cp)
@@ -743,7 +774,7 @@ def cmd_light_verify(root, a):
         else:
             exits, hits = [], 0
             for i in range(LIGHT_REPRO_RUNS):
-                code, out = _run_repro(profile, root, ws, root)
+                code, out = _run_repro(profile, root, ws, root, allow_user_url=True)
                 (vdir / f"repro_{i}.out").write_text(out)
                 exits.append(code)
                 hits += observed in out
@@ -775,7 +806,12 @@ def _light_labels(led):
     )  # 수정 후 재현이 «죽어서» observed 가 안 나온 것은 고쳐진 것이 아니다(A2 리뷰 실측)
     unstable = any(c["to"] == "light" and c["kind"] in ("cannot-measure", "unstable") for c in led["track_changes"])
     labels = []
-    if not clean or unstable:
+    if repro and repro["mode"] == "after-only":
+        # 기준선을 못 쟀다는 것만으로는 결정론 표지가 아니다 — 수정 후에도 재현되거나 재현이 죽었을 때만
+        if repro["after_observed"] or repro["after_exit"] != 0 or unstable:
+            labels.append(LABEL_NO_DETERMINISM)
+        labels.append(LABEL_NO_BASELINE_REPRO)
+    elif not clean or unstable:
         labels.append(LABEL_NO_DETERMINISM)
     reg = last and last["regress"]
     if not reg or reg["exit"] not in (0, 1):
@@ -807,6 +843,8 @@ def cmd_light_report(root, a):
         if r["mode"] == "deterministic":
             body.append(f"재현: 수정 전 재현={r['before_observed']}(exit {r['before_exit']}) · "
                         f"수정 후 재현={r['after_observed']}(exit {r['after_exit']})")
+        elif r["mode"] == "after-only":
+            body.append(f"재현: 수정 후만(ui 없음) 재현={r['after_observed']}(exit {r['after_exit']})")
         else:
             body.append(f"재현: {r['runs']}회 중 {r['observed_hits']}회 관측 (비결정)")
     if last and last["regress"]:

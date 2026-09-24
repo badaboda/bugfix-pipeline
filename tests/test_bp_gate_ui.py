@@ -52,3 +52,90 @@ def test_url_row_serves_the_measured_tree(tmp_path):
     gate(root, "run", "b1")
     axes = json.loads((ws / "verdict_1.json").read_text())["rows"]["R-CONTROL"]["axes"]
     assert axes[0]["cause_red"] is True
+
+
+import subprocess  # noqa: E402
+
+import bp_gate  # noqa: E402
+from bp_fixture import git, ledger, make_gate_host  # noqa: E402
+
+
+def _ui_repro(ws, url=""):
+    (ws / "repro.md").write_text(
+        f"steps: 화면\nobserved: bad\nwhere: 로컬\nneeds_ui: yes\nurl: {url}\nexpected_after: good\n")
+    (ws / "repro.sh").write_text(REPRO_URL_SH)
+
+
+def test_triage_serves_a_ui_repro(tmp_path):
+    root = make_gate_host(tmp_path, UI_OVERRIDES)
+    gate(root, "init", "b1")
+    _ui_repro(root / ".bugfix-pipeline" / "b1")
+    gate(root, "triage", "b1", "--repro-confirmed")
+    assert ledger(root, "b1")["triage"]["deterministic"] is True
+
+
+def _user_server(root):
+    """사용자 개발 서버 흉내 — 작업 트리를 서빙한다. (프로세스, 포트)"""
+    server = subprocess.Popen([sys.executable, "-u", "-c",
+                               "import functools,http.server,socketserver,sys\n"
+                               "h=functools.partial(http.server.SimpleHTTPRequestHandler,directory=sys.argv[1])\n"
+                               "s=socketserver.TCPServer(('127.0.0.1',0),h)\n"
+                               "print(s.server_address[1],flush=True)\n"
+                               "s.serve_forever()", str(root)],
+                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    return server, server.stdout.readline().strip()
+
+
+def test_triage_without_ui_is_not_deterministic(tmp_path):
+    # 사용자 서버로 재현이 «매번» 되어도 기준선 사본은 잴 수 없다 — 결정적으로 치지 않는다
+    root = make_gate_host(tmp_path)
+    server, port = _user_server(root)
+    try:
+        gate(root, "init", "b1")
+        _ui_repro(root / ".bugfix-pipeline" / "b1", url=f"http://127.0.0.1:{port}")
+        gate(root, "triage", "b1", "--repro-confirmed")
+        t = ledger(root, "b1")["triage"]
+        assert all(r["observed"] for r in t["runs"]) and t["deterministic"] is False
+    finally:
+        server.terminate()
+        server.wait()
+
+
+def test_light_with_ui_measures_before_and_after(tmp_path):
+    root = make_gate_host(tmp_path, UI_OVERRIDES)
+    gate(root, "init", "b1")
+    _ui_repro(root / ".bugfix-pipeline" / "b1")
+    gate(root, "triage", "b1", "--repro-confirmed", "--light")
+    (root / "value.txt").write_text("good\n")
+    git(root, "commit", "-q", "-am", "fix: value")
+    gate(root, "light-verify", "b1")
+    rec = ledger(root, "b1")["light_verifications"][-1]["repro"]
+    assert rec["mode"] == "deterministic" and rec["before_observed"] and not rec["after_observed"]
+
+
+def test_light_without_ui_measures_after_only_and_labels(tmp_path):
+    root = make_gate_host(tmp_path)
+    (root / "value.txt").write_text("good\n")
+    git(root, "commit", "-q", "-am", "chore: 미리")
+    server = subprocess.Popen([sys.executable, "-u", "-c",
+                               "import functools,http.server,socketserver,sys\n"
+                               "h=functools.partial(http.server.SimpleHTTPRequestHandler,directory=sys.argv[1])\n"
+                               "s=socketserver.TCPServer(('127.0.0.1',0),h)\n"
+                               "print(s.server_address[1],flush=True)\n"
+                               "s.serve_forever()", str(root)],
+                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    try:
+        port = server.stdout.readline().strip()
+        gate(root, "init", "b1")
+        ws = root / ".bugfix-pipeline" / "b1"
+        _ui_repro(ws, url=f"http://127.0.0.1:{port}")
+        gate(root, "triage", "b1", "--repro-confirmed")
+        git(root, "commit", "-q", "--allow-empty", "-m", "fix: 빈")
+        assert gate(root, "light-verify", "b1") == 0
+        rec = ledger(root, "b1")["light_verifications"][-1]["repro"]
+        assert rec["mode"] == "after-only" and not rec["after_observed"]
+        labels = bp_gate._light_labels(ledger(root, "b1"))
+        assert bp_gate.LABEL_NO_BASELINE_REPRO in labels and bp_gate.LABEL_NO_DETERMINISM not in labels
+    finally:
+        server.terminate()
+        server.wait()

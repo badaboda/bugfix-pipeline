@@ -115,8 +115,13 @@ v1 템플릿에는 `serve_cmd` 가 없다.
 
 ## `ui.serve_cmd` 계약
 
-`<serve_cmd…> <트리>` — 그 트리로 앱을 띄우고 stdout 에 `ready_marker` 에 걸리는 줄 `BP_URL=<url>` 을 한 번
-낸다. 플러그인은 `ready_timeout_s` 까지 기다리고, 끝나면 프로세스 그룹에 SIGTERM, 10 초 뒤 SIGKILL.
+`<serve_cmd…> <트리>` — 그 트리로 앱을 띄우고, **듣기 시작한 뒤** stdout 에 `ready_marker` 에 걸리는 줄
+`BP_URL=<url>` 을 한 번 낸다. 플러그인은 `ready_timeout_s` 까지 기다리고(서버가 그 전에 끝나면 즉시 실패), 끝나면
+프로세스 **그룹**에 SIGTERM, 10 초 뒤 SIGKILL — 래퍼가 띄운 자식 서버까지 내려간다.
+
+```sh
+python3 <플러그인>/scripts/bp_ui.py check [트리]   # 띄워 보고 URL 을 찍고 내린다 — exit 0 OK · 2 실패
+```
 
 ## 템플릿 (실측한 것만)
 

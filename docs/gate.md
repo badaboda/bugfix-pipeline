@@ -65,8 +65,8 @@ python3 <플러그인>/scripts/bp_gate.py --selftest
 
 | 파일 | 누가 | 형식 |
 |---|---|---|
-| `repro.md` | P0 · GATE 1 | 한 줄 `키: 값` — `steps:` · `observed:` · `where:` · `expected_after:` |
-| `repro.sh` | P0 (재현 자동화) | `repro.sh <트리>` — `observed` 를 출력으로 드러낸다 |
+| `repro.md` | P0 · GATE 1 | 한 줄 `키: 값` — `steps:` · `observed:` · `where:` · `needs_ui:` · `url:` · `expected_after:` |
+| `repro.sh` | P0 (재현 자동화) | `repro.sh <트리> [<URL>]` — `observed` 를 출력으로 드러낸다. `needs_ui: yes` 면 두 번째 인자로 그 트리를 서빙하는 앱의 URL |
 | `root_cause.json` | 조사자 | `cause_id` · `verdict`(`BUG`/`NOT-A-BUG`/`CANNOT-MEASURE`) · `file` · `line` · `fix_scope` |
 | `rubric.json` | 조사자 → GATE 1 | 아래 |
 | `control/*.diff` | 조사자 | `git apply` 할 수 있는 patch |
@@ -85,7 +85,8 @@ python3 <플러그인>/scripts/bp_gate.py --selftest
 }
 ```
 
-- 자리표시자: `{exec}` · `{tree}` · `{out}` · `{repro}`. `{url}` 은 화면 서버(`bp_ui`, 계획 A3) 이후.
+- 자리표시자: `{exec}` · `{tree}` · `{out}` · `{repro}` · `{url}`. `{url}` 은 프로파일에 `ui` 가 있을 때만 — 그 행을
+  잴 때마다 `bp_ui` 가 **그 행의 트리**(원본 또는 사본)로 앱을 띄우고 내린다.
 - `assert` 가 없으면 probe 종료코드 == 0.
 - `R-CONTROL` 축은 사본에 변이를 걸고 `R-CAUSE` 를 잰다 — **빨개져야** 통과, `alive` 는 초록이어야 한다.
   `@baseline` 은 «수정 되돌리기»(조사자는 P1 에서 기준선 sha 를 모른다).
@@ -99,6 +100,10 @@ python3 <플러그인>/scripts/bp_gate.py --selftest
 |---|---|
 | `결정론 판정 없음` | 마지막 검증에 «수정 전 재현 · 수정 후 사라짐»이 결정적으로 없음(수정 후 재현의 exit 가 0 도, 수정 전 exit 도 아니면 «죽은» 것으로 본다) · 또는 `to-light --kind cannot-measure\|unstable` 이력 |
 | `회귀 미검증` | 마지막 검증에 회귀 축이 없음(`regress` 섹션 없음) 또는 측정 무효 |
+| `기준선 미재현` | 화면 재현(`needs_ui: yes`)인데 프로파일에 `ui` 가 없어 `url:`(사용자 서버)로 **현재 트리만** 쟀다 |
+
+화면 재현의 트리아지: `ui` 가 있으면 `bp_ui` 로 띄워 3 회. `ui` 가 없으면 사용자 URL 로 재지만 **결정적으로 치지
+않는다**(기준선 사본을 잴 수 없어 정식 트랙의 `R-SYMPTOM` 이 성립하지 않는다).
 
 ## PR 본문 위생
 
