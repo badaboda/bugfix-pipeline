@@ -9,7 +9,7 @@
       "name": "bugfix-pipeline",
       "source": "./",
       "description": "버그 수정 요청을 원인 규명부터 PR 까지 잇는 결정론 게이트 오케스트레이터",
-      "version": "0.1.0"
+      "version": "0.1.1"
     }
   ]
 }
