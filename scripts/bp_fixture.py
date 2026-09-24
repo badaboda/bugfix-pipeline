@@ -138,3 +138,39 @@ def gate(root, *args) -> int:
 
 def ledger(root, slug) -> dict:
     return json.loads((Path(root) / ".bugfix-pipeline" / slug / "ledger.json").read_text())
+
+
+BROKEN_PATCH = """diff --git a/broken b/broken
+new file mode 100644
+--- /dev/null
++++ b/broken
+@@ -0,0 +1 @@
++x
+"""
+
+RUBRIC_OK = {
+    "cause_id": "value-01",
+    "R-CAUSE": {"probe": ["{exec}", "{tree}", "--", "sh", "check.sh"]},
+    "R-SYMPTOM": {"probe": ["{exec}", "{tree}", "--", "sh", "{repro}", "{tree}"],
+                  "assert": ["grep", "-q", "good", "{out}"]},
+    "R-CONTROL": {"axes": [
+        {"name": "수정 되돌림", "mutate": {"checkout": "@baseline"}},
+        {"name": "broken 추가", "mutate": {"patch": "control/broken.diff"}},
+    ]},
+}
+
+
+def formal_ready(tmp, rubric=None, overrides=None):
+    """정식 트랙 P1 까지 + GATE 1 입력(root_cause · rubric · patch · expected_after)."""
+    root = make_gate_host(tmp, overrides)
+    ws = root / ".bugfix-pipeline" / "b1"
+    gate(root, "init", "b1")
+    (ws / "repro.md").write_text("steps: 화면\nobserved: bad\nwhere: 로컬\nexpected_after: good\n")
+    (ws / "repro.sh").write_text(REPRO_SH_TEXT)
+    gate(root, "triage", "b1", "--repro-confirmed")
+    (ws / "root_cause.json").write_text(json.dumps(
+        {"cause_id": "value-01", "verdict": "BUG", "file": "value.txt", "line": 1, "fix_scope": ["value.txt"]}))
+    (ws / "rubric.json").write_text(json.dumps(rubric or RUBRIC_OK, ensure_ascii=False))
+    (ws / "control").mkdir()
+    (ws / "control" / "broken.diff").write_text(BROKEN_PATCH)
+    return root, ws

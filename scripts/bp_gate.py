@@ -161,6 +161,150 @@ def cmd_init(root, a):
     return EXIT_OK
 
 
+PLACEHOLDERS = ("{exec}", "{tree}", "{out}", "{repro}")
+_RUBRIC_KEYS = {"cause_id", "R-CAUSE", "R-SYMPTOM", "R-CONTROL"}
+BASELINE_REF = "@baseline"
+
+
+def _read_json(path, problems):
+    if not path.is_file():
+        problems.append(f"{path.name} 가 없다")
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError as e:
+        problems.append(f"{path.name} 가 JSON 이 아니다: {e}")
+        return None
+    if not isinstance(data, dict):
+        problems.append(f"{path.name} 최상위가 객체가 아니다")
+        return None
+    return data
+
+
+def _argv(value, name, required, problems):
+    if value is None:
+        if required:
+            problems.append(f"{name} 가 없다")
+        return
+    if not (isinstance(value, list) and value and all(isinstance(x, str) and x for x in value)):
+        problems.append(f"{name} 는 비어 있지 않은 문자열 배열이어야 한다")
+        return
+    for tok in value:
+        for ph in re.findall(r"\{[^{}]*\}", tok):
+            if ph == "{url}":
+                problems.append(f"{name}: {{url}} 은 화면 서버(계획 A3) 이후에 쓸 수 있다")
+            elif ph not in PLACEHOLDERS:
+                problems.append(f"{name}: 모르는 자리표시자 {ph}")
+
+
+def _validate_rubric(root, ws, rub, problems):
+    """문제를 모으고 동결할 patch 상대경로 목록을 돌려준다."""
+    for k in sorted(set(rub) - _RUBRIC_KEYS):
+        problems.append(f"rubric 모르는 키: {k}")
+    if not isinstance(rub.get("cause_id"), str) or not rub.get("cause_id"):
+        problems.append("rubric.cause_id 가 없다")
+    for row in ("R-CAUSE", "R-SYMPTOM"):
+        r = rub.get(row)
+        if not isinstance(r, dict):
+            problems.append(f"{row} 가 없다")
+            continue
+        for k in sorted(set(r) - {"probe", "assert"}):
+            problems.append(f"{row} 모르는 키: {k}")
+        _argv(r.get("probe"), f"{row}.probe", True, problems)
+        _argv(r.get("assert"), f"{row}.assert", False, problems)
+    patches = []
+    ctl = rub.get("R-CONTROL")
+    if not isinstance(ctl, dict) or not isinstance(ctl.get("axes"), list) or not ctl["axes"]:
+        problems.append("R-CONTROL.axes 가 비었다 — 축이 하나 이상 있어야 한다")
+        return patches
+    for k in sorted(set(ctl) - {"axes"}):
+        problems.append(f"R-CONTROL 모르는 키: {k}")
+    for i, ax in enumerate(ctl["axes"]):
+        name = f"R-CONTROL.axes[{i}]"
+        if not isinstance(ax, dict):
+            problems.append(f"{name} 는 객체여야 한다")
+            continue
+        for k in sorted(set(ax) - {"name", "mutate", "alive"}):
+            problems.append(f"{name} 모르는 키: {k}")
+        if not isinstance(ax.get("name"), str) or not ax.get("name"):
+            problems.append(f"{name}.name 이 없다")
+        m = ax.get("mutate")
+        if isinstance(m, dict) and set(m) == {"patch"} and isinstance(m["patch"], str):
+            rel = Path(m["patch"])
+            if rel.is_absolute() or ".." in rel.parts:
+                problems.append(f"{name}.mutate.patch 는 작업공간 안 상대 경로여야 한다")
+            elif not (ws / rel).is_file():
+                problems.append(f"{name}.mutate.patch 파일이 없다: {rel}")
+            else:
+                patches.append(rel.as_posix())
+        elif isinstance(m, dict) and set(m) == {"checkout"} and isinstance(m["checkout"], str):
+            ref = m["checkout"]
+            if ref != BASELINE_REF and _git(root, "rev-parse", "--verify", "-q", ref + "^{commit}").returncode:
+                problems.append(f"{name}.mutate.checkout 커밋이 없다: {ref}")
+        else:
+            problems.append(f'{name}.mutate 는 {{"patch": …}} 또는 {{"checkout": …}} 이어야 한다')
+        _argv(ax.get("alive"), f"{name}.alive", False, problems)
+    return patches
+
+
+def _validate_frozen_set(root, ws):
+    problems = []
+    rc = _read_json(ws / ROOT_CAUSE, problems)
+    rub = _read_json(ws / RUBRIC, problems)
+    if not _repro_fields(ws).get("expected_after"):
+        problems.append("repro.md 의 expected_after 가 비었다 — GATE 1 에서 사용자가 채운다")
+    if rc is not None:
+        v = rc.get("verdict")
+        if v == "CANNOT-MEASURE":
+            problems.append("판정 CANNOT-MEASURE — 동결하지 않는다. to-light --kind cannot-measure 로 이관한다")
+        elif v not in ("BUG", "NOT-A-BUG"):
+            problems.append(f"root_cause.verdict 가 BUG/NOT-A-BUG 가 아니다: {v!r}")
+    patches = _validate_rubric(root, ws, rub, problems) if rub is not None else []
+    if rc is not None and rub is not None and rc.get("cause_id") != rub.get("cause_id"):
+        problems.append("root_cause.json 과 rubric.json 의 cause_id 가 다르다")
+    if problems:
+        raise GateError("동결 거부:\n" + "\n".join(f"  - {p}" for p in problems))
+    files = [ROOT_CAUSE, RUBRIC, REPRO_MD] + ([REPRO_SH] if (ws / REPRO_SH).is_file() else []) + patches
+    return rub["cause_id"], {f: _sha256(ws / f) for f in files}
+
+
+def cmd_freeze(root, a):
+    ws = _ws(root, a.slug)
+    led = _load(ws)
+    if led["track"] != "formal":
+        raise GateError("정식 트랙에서만 동결한다")
+    if led["frozen"] is not None:
+        raise GateError("이미 동결됐다 — 바꾸려면 refreeze --reason")
+    cause_id, frozen = _validate_frozen_set(root, ws)
+    led.update(cause_id=cause_id, frozen=frozen, phase="P2")
+    _save(ws, led)
+    print(f"freeze OK — cause_id={cause_id} 파일 {len(frozen)}개")
+    return EXIT_OK
+
+
+def cmd_refreeze(root, a):
+    ws = _ws(root, a.slug)
+    led = _load(ws)
+    if led["frozen"] is None:
+        raise GateError("아직 동결 전이다 — freeze")
+    cause_id, frozen = _validate_frozen_set(root, ws)
+    entry = {"kind": "refreeze", "reason": a.reason, "at": _now(),
+             "from_cause": led["cause_id"], "to_cause": cause_id}
+    if cause_id != led["cause_id"]:
+        led["cause_changes"].append(entry)
+    if a.refund_last:
+        _refund_last(led, entry)
+    led["history"].append(entry)
+    led.update(cause_id=cause_id, frozen=frozen)
+    _save(ws, led)
+    print(f"refreeze OK — cause_id={cause_id}")
+    return EXIT_OK
+
+
+def _refund_last(led, entry):
+    raise GateError("환불은 Task 5 에서")
+
+
 def _run_repro(profile, root, ws, tree):
     argv = bp_profile.exec_argv(profile, tree, ["sh", str(ws / REPRO_SH), str(tree)])
     r = subprocess.run(argv, cwd=str(root), capture_output=True, text=True)
@@ -268,11 +412,18 @@ def _parser():
     s.add_argument("slug")
     s.add_argument("--kind", required=True, choices=["cannot-measure", "unstable", "size"])
     s.add_argument("--reason", required=True)
+    s = sub.add_parser("freeze")
+    s.add_argument("slug")
+    s = sub.add_parser("refreeze")
+    s.add_argument("slug")
+    s.add_argument("--reason", required=True)
+    s.add_argument("--refund-last", action="store_true")
     return p
 
 
 COMMANDS = {"init": cmd_init, "status": cmd_status, "triage": cmd_triage,
-            "promote": cmd_promote, "to-light": cmd_to_light}
+            "promote": cmd_promote, "to-light": cmd_to_light,
+            "freeze": cmd_freeze, "refreeze": cmd_refreeze}
 
 
 def main(argv) -> int:
