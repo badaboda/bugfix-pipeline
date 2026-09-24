@@ -219,6 +219,14 @@ def load(root) -> Profile:
     return Profile(root, True, exec_cmd, regress, ui)
 
 
+def exec_argv(profile, tree, cmd) -> list:
+    """«이 트리에서 이 명령» argv. 프로파일 exec 가 없으면 내장 기본값(bp_exec_local)."""
+    if profile.exec_cmd:
+        return [*profile.exec_cmd, str(tree), "--", *cmd]
+    local = Path(__file__).resolve().parent / "bp_exec_local.py"
+    return [sys.executable, str(local), str(tree), "--", *cmd]
+
+
 def toplevel(cwd) -> Path:
     r = subprocess.run(
         ["git", "-C", str(cwd), "rev-parse", "--show-toplevel"], capture_output=True, text=True
