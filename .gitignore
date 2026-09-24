@@ -1,0 +1,7 @@
+bugfix-pipeline 작업 산출물
+.bugfix-pipeline/
+__pycache__/
+*.pyc
+.DS_Store
+# 로컬 전용 — 원천 프로젝트(비공개) 내부 정보가 담긴 인수인계 문서
+docs/private/

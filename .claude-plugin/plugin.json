@@ -1,0 +1,14 @@
+{
+  "name": "bugfix-pipeline",
+  "description": "버그 수정 요청 하나를 원인 규명 → 수정 → 검증 → QA → CTA 전수 스윕 → PR 까지 잇는 오케스트레이터. 통과 기준을 수정이 존재하기 전에 동결해 결정론적으로 판정한다 — 판정은 LLM 이 아니라 assert 종료코드이고, 귀속은 진리표다.",
+  "version": "0.1.0",
+  "keywords": [
+    "bugfix",
+    "debugging",
+    "tdd",
+    "root-cause",
+    "code-review",
+    "workflow",
+    "deterministic-gate"
+  ]
+}

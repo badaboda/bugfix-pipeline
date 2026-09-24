@@ -1,0 +1,23 @@
+#!/bin/sh
+# bugfix-pipeline: production feat/fix 는 본문에 'RED: <sha>' 를 요구한다.
+#
+# 구현을 RED 없이 커밋하면 테스트가 구현에 맞춰 휘었는지 알 수 없다.
+# 이 훅은 git 이 «항상» 부르므로, 안 읽어도 걸린다.
+msg_file="$1"
+[ -n "$msg_file" ] || exit 0
+
+subject=$(head -1 "$msg_file")
+
+case "$subject" in
+  feat*|fix*) ;;
+  *) exit 0 ;;
+esac
+
+if grep -qE '^RED: [0-9a-f]{7,40}$' "$msg_file"; then
+  exit 0
+fi
+
+echo "commit-msg 거부: feat/fix 는 본문에 'RED: <sha>' 가 필요하다." >&2
+echo "  RED 테스트를 먼저 커밋하고 그 sha 를 본문 한 줄로 적어라." >&2
+echo "  예: RED: 3c8cb05" >&2
+exit 1

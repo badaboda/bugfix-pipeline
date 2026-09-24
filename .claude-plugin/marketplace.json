@@ -1,0 +1,15 @@
+{
+  "name": "bugfix-pipeline-marketplace",
+  "description": "bugfix-pipeline 플러그인 배포용 단일 플러그인 마켓플레이스",
+  "owner": {
+    "name": "marcus.k"
+  },
+  "plugins": [
+    {
+      "name": "bugfix-pipeline",
+      "source": "./",
+      "description": "버그 수정 요청을 원인 규명부터 PR 까지 잇는 결정론 게이트 오케스트레이터",
+      "version": "0.1.0"
+    }
+  ]
+}
