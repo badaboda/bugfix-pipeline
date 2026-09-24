@@ -5,6 +5,7 @@ bp_profile·bp_regress 의 --selftest(설치처, 의존 0)와 tests/(개발, pyt
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 PROFILE_DEFAULTS = {
@@ -62,3 +63,35 @@ def make_root(tmp, overrides=None) -> Path:
     side.chmod(0o755)
     write_profile(root, overrides)
     return root
+
+
+def git(tree, *args) -> str:
+    r = subprocess.run(
+        ["git", "-C", str(tree), "-c", "user.name=t", "-c", "user.email=t@t",
+         "-c", "commit.gpgsign=false", *args],
+        capture_output=True, text=True, check=True,
+    )
+    return r.stdout.strip()
+
+
+def set_failures(tree, names) -> None:
+    (Path(tree) / "failures.txt").write_text("".join(n + "\n" for n in names))
+
+
+def set_mode(tree, mode) -> None:
+    (Path(tree) / "mode").write_text(mode)
+
+
+def make_host(tmp, base_failures=(), after_failures=(), overrides=None):
+    """(호출 루트 = 수정 후 트리, 기준선 트리). 기준선은 커밋 A 의 워크트리, 수정 후는 A 위 커밋 B."""
+    tmp = Path(tmp).resolve()
+    root = make_root(tmp, overrides)
+    set_failures(root, base_failures)
+    git(root, "init", "-q", "-b", "main")
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "A")
+    base = tmp / "base"
+    git(root, "worktree", "add", "-q", "--detach", str(base), "HEAD")
+    set_failures(root, after_failures)
+    git(root, "commit", "-q", "--allow-empty", "-am", "B")
+    return root, base
