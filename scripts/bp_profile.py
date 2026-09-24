@@ -236,6 +236,57 @@ def toplevel(cwd) -> Path:
     return Path(r.stdout.strip())
 
 
+TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
+WRAPPER_DIR = ".claude/bugfix-pipeline"
+# 스택 → 그 스택을 가리키는 파일들(앞에 있을수록 우선 — 첫 번째 발견이 tree_marker 가 된다)
+STACK_SIGNALS = {
+    "pytest": ["pyproject.toml", "pytest.ini", "setup.cfg", "setup.py"],
+    "vitest": ["vitest.config.ts", "vitest.config.mts", "vitest.config.js", "vitest.config.mjs"],
+}
+
+
+def _detect(root):
+    found = {}
+    for stack, files in STACK_SIGNALS.items():
+        hit = next((f for f in files if (root / f).is_file()), None)
+        if hit:
+            found[stack] = hit
+    return found
+
+
+def init(root) -> int:
+    """초안을 쓴다. 0 = 썼다 · 2 = 쓰지 않았다(이유는 stderr). 추정하지 않는다 — 신호가 하나일 때만."""
+    root = Path(root).resolve()
+    profile = root / PROFILE_PATH
+    if profile.exists():
+        print(f"init: 이미 있다 — 덮어쓰지 않는다: {profile}", file=sys.stderr)
+        return 2
+    found = _detect(root)
+    if len(found) != 1:
+        listed = ", ".join(f"{s}({f})" for s, f in found.items()) or "없음"
+        print(f"init: 스택 신호가 하나가 아니다 — {listed}. 고르지 않는다 — templates/ 에서 직접 복사한다",
+              file=sys.stderr)
+        return 2
+    (stack, signal), = found.items()
+    src = TEMPLATES / stack
+    dst = root / WRAPPER_DIR
+    for name in ("bp_exec.sh", "bp_side.sh"):
+        if (dst / name).exists():
+            print(f"init: 이미 있다 — 덮어쓰지 않는다: {dst / name}", file=sys.stderr)
+            return 2
+    dst.mkdir(parents=True, exist_ok=True)
+    for name in ("bp_exec.sh", "bp_side.sh"):
+        shutil.copyfile(src / name, dst / name)
+        (dst / name).chmod(0o755)
+    data = json.loads((src / "profile.json").read_text(encoding="utf-8"))
+    data["regress"]["tree_marker"] = signal
+    draft = {DRAFT_KEY: f"{stack} 템플릿 초안 — 래퍼와 패턴을 확인한 뒤 이 키를 지운다", **data}
+    profile.write_text(json.dumps(draft, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(f"init: {stack} 초안을 썼다 — {profile} · {dst}/")
+    print(f"  확인 후 {DRAFT_KEY} 키를 지우고: python3 {Path(__file__).name} check")
+    return 0
+
+
 def _check(argv) -> int:
     try:
         root = Path(argv[0]) if argv else toplevel(Path.cwd())
@@ -322,6 +373,12 @@ def _selftest() -> int:
 def main(argv) -> int:
     if argv[:1] == ["check"] and len(argv) <= 2:
         return _check(argv[1:])
+    if argv[:1] == ["init"] and len(argv) <= 2:
+        try:
+            return init(Path(argv[1]) if len(argv) == 2 else toplevel(Path.cwd()))
+        except ProfileError as e:
+            print("\n".join(e.problems), file=sys.stderr)
+            return 2
     if argv == ["--selftest"]:
         return _selftest()
     print("사용법: bp_profile.py check [호출 루트] | init [호출 루트] | --selftest", file=sys.stderr)
