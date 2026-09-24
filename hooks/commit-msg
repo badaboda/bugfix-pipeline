@@ -3,6 +3,13 @@
 #
 # 구현을 RED 없이 커밋하면 테스트가 구현에 맞춰 휘었는지 알 수 없다.
 # 이 훅은 git 이 «항상» 부르므로, 안 읽어도 걸린다.
+
+# 🔴 이 훅은 «설치된 가지»에서만 발화한다. hooks 디렉토리가 워크트리 사이에 공유되므로,
+# 가지 검사가 없으면 남의 워크트리 커밋까지 막는다 — 실측으로 겪었다.
+_bp_branch="@@BUGFIX_PIPELINE_BRANCH@@"
+_cur_branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+[ "$_cur_branch" = "$_bp_branch" ] || exit 0
+
 msg_file="$1"
 [ -n "$msg_file" ] || exit 0
 

@@ -48,7 +48,7 @@
 python3 scripts/bugfix_verdict.py --selftest
 ```
 
-진리표 8행 전수 + `ValueError` 경로 4개를 검사한다. P0 가 이것을 선행 조건으로 부른다.
+진리표 8행 + `ValueError` 경로 4개 + 「cap 은 CODE 만」 불변식을 입력 공간 전수(162개)로 검사한다. P0 가 이것을 선행 조건으로 부른다.
 
 > 왜 pytest 가 아닌가: 이 파일은 임의의 호스트 프로젝트에 설치된다. pytest 가 있다고 가정할 수 없다 — 실측에서 개발 랩탑 호스트 python3 에 없었다. 레포의 `tests/` pytest 스위트는 «개발용»이고 `--selftest` 는 «설치처용»이다.
 
@@ -60,19 +60,21 @@ hooks/install.sh verify      # 🔴 실제로 불리는지 증명
 hooks/install.sh uninstall   # 제거 (작업 가지 한정이므로 끝나면 반드시)
 ```
 
-`verify` 는 선행 조건 2축(훅이 **있는가** · **실행 가능한가**)과 세 축(RED 없는 `fix` 거부 / RED 있는 `fix` 통과 / `docs` 무간섭)을 흔든다.
+훅은 **설치한 가지에서만** 발화한다. 워크트리들은 hooks 디렉토리를 공유하므로, 가지 검사가 없으면 남의 워크트리 커밋까지 막는다. 그래서 detached HEAD 에서는 설치를 거부한다.
+
+`verify` 는 선행 조건 3축(훅이 **있는가** · **실행 가능한가** · **이 가지 것인가**)과 세 축(RED 없는 `fix` 거부 / RED 있는 `fix` 통과 / `docs` 무간섭)을 흔든다.
 
 > 🔴 `git hook run <hook>` 은 훅이 **없을 때도 exit 1** 이다(`error: cannot find a hook named …`). 종료코드만 보면 「훅이 거부했다」와 「훅이 없다」가 같은 얼굴이라 거짓 초록이 난다 — 실측으로 확인했고, 그래서 `verify` 가 선행 조건과 표지 문구로 둘을 가른다.
 
 ## 현재 상태 (v0.1.0 — 스캐폴드)
 
-> 🔴 **아래 표는 2026-09-22 스캐폴드 시점이다.** 그 뒤 원천 프로젝트에서 실전을 돌려 이식본이 이미 낡았다(훅 가지 한정 누락 등). 격차 목록은 메인테이너 로컬 전용 인수인계 문서(`docs/private/`, gitignore — 원천 프로젝트가 비공개라 공개하지 않는다)에 있다.
+> 🔴 **아래 표는 2026-09-22 스캐폴드 시점을 2026-09-24 에 부분 갱신한 것이다.** 훅 가지 한정·cap 전수 검사는 원천(머지 커밋 `8b1135e` 기준)과 맞췄다. 나머지 격차 목록은 메인테이너 로컬 전용 인수인계 문서(`docs/private/`, gitignore — 원천 프로젝트가 비공개라 공개하지 않는다)에 있다.
 
 | 구성물 | 상태 |
 |---|---|
 | `scripts/bugfix_verdict.py` (+ `--selftest`) | ✅ 이식 완료 · 호스트 실행 확인 · 양방향 양성 대조 확인 |
 | `tests/test_bugfix_verdict.py` | ✅ 이식 (pytest, 개발용) |
-| `hooks/commit-msg` · `hooks/install.sh` | ✅ 이식 완료 · 실제 `git commit` 차단 실측 |
+| `hooks/commit-msg` · `hooks/install.sh` | ✅ 원천 최신과 동기화 · 가지 한정·연결 워크트리 install 을 실제 `git commit` 으로 실측 (수정 전 판에서 빨강 대조) |
 | `agents/bug-root-cause-investigator.md` | ⚠️ 이식했으나 **아직 탈-프로젝트화 안 됨** |
 | `skills/bugfix-pipeline/SKILL.md` | ❌ **미이식** — 원본이 특정 리포에 결합돼 있어 프로파일 기반으로 재작성 필요 |
 | 범용 에이전트 6개 (RED · GREEN×2 · 게이트 · 스위퍼 · 스윕게이트) | ❌ **미작성** |

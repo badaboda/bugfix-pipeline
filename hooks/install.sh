@@ -5,11 +5,13 @@
 set -e
 
 here=$(cd "$(dirname "$0")" && pwd)
-repo=$(git rev-parse --show-toplevel)
-target="$repo/.git/hooks/commit-msg"
+# 🔴 워크트리의 `.git` 은 정규 파일이라 `$repo/.git/hooks` 는 ENOTDIR 로 깨진다.
+# `--git-path` 는 워크트리에서도 «공용» hooks 디렉토리로 정확히 해소된다 (실측 확인).
+hooks_dir=$(git rev-parse --git-path hooks)
+target="$hooks_dir/commit-msg"
 
 # verify 가 쓰는 임시 메시지 파일. mktemp 은 복합 셸에서 권한 프롬프트를 유발하므로 고정 경로를 쓴다.
-tmp="$repo/.git/bugfix-pipeline-verify-msg"
+tmp="$(git rev-parse --git-path bugfix-pipeline-verify-msg)"
 
 # 🔴 `git hook run <h>` 은 훅이 «없을 때도» exit 1 ("cannot find a hook")이다.
 # 그래서 종료코드만 보면 「훅이 거부했다」와 「훅이 없다」가 같은 얼굴이다 — 실측으로 확인했다.
@@ -24,14 +26,22 @@ _run_hook() {
 
 case "$1" in
   install)
+    mkdir -p "$hooks_dir"
     if [ -e "$target" ]; then
       echo "이미 commit-msg 훅이 있다: $target" >&2
       echo "덮어쓰지 않는다 — 남의 훅일 수 있다. 수동으로 확인하라." >&2
       exit 1
     fi
-    cp "$here/commit-msg" "$target"
+    branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+    if [ -z "$branch" ]; then
+      echo "detached HEAD 에서는 설치하지 않는다 — 가지 범위를 못 정한다." >&2
+      exit 1
+    fi
+    # 🔴 워크트리들이 hooks 디렉토리를 공유한다. 가지를 훅에 박아 «이 가지에서만» 발화시킨다.
+    # 안 그러면 남의 워크트리 커밋까지 막는다 (실측으로 겪었다).
+    sed "s|@@BUGFIX_PIPELINE_BRANCH@@|$branch|" "$here/commit-msg" > "$target"
     chmod +x "$target"
-    echo "설치: $target"
+    echo "설치: $target (가지 $branch 한정)"
     ;;
   uninstall)
     if [ ! -e "$target" ]; then
@@ -54,6 +64,12 @@ case "$1" in
     fi
     if [ ! -x "$target" ]; then
       echo "FAIL: 훅에 실행 권한이 없다 — git 이 조용히 무시한다: $target" >&2
+      exit 1
+    fi
+
+    # ── 선행 조건 ③: 이 훅이 «이 가지» 것인가 ──────────────────────────
+    if ! grep -q "_bp_branch=\"$(git symbolic-ref --short HEAD 2>/dev/null)\"" "$target"; then
+      echo "FAIL: 설치된 훅이 다른 가지 것이다 — 이 가지에서는 발화하지 않는다" >&2
       exit 1
     fi
 
