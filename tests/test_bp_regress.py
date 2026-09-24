@@ -193,3 +193,10 @@ def test_unexpected_exception_is_void_not_red(tmp_path):
         assert (out / "EXIT").read_text() == "3\n"
     finally:
         profile.chmod(0o644)
+
+
+def test_after_tree_moved_while_the_base_side_runs_is_void(tmp_path):
+    root, base = bp_fixture.make_host(tmp_path, [], [])
+    bp_fixture.set_mode(base, "commit_other")  # 기준선 쪽 실행 중에 수정 후 트리에 커밋
+    (base / "other").write_text(str(root))
+    assert run(base, root, tmp_path / "out", root=root) == 3

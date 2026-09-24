@@ -48,7 +48,8 @@ def _inside(path, roots) -> bool:
     return not roots or any(path == r or r in path.parents for r in roots)
 
 
-def _preflight(profile, base, after, out) -> None:
+def _preflight(profile, base, after, out):
+    """검사를 통과하면 방향을 잰 (기준선 HEAD, 수정 후 HEAD) 를 돌려준다."""
     for tree in (base, after):
         if not tree.is_dir():
             raise _Stop(EXIT_CONFIG, f"설정 오류: 트리가 없다 — {tree}")
@@ -69,15 +70,19 @@ def _preflight(profile, base, after, out) -> None:
         )
     if rc:
         raise _Stop(EXIT_VOID, f"측정 무효: 조상 관계를 못 쟀다 — {base_head} · {after_head}")
+    return base_head, after_head
 
 
 def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S")
 
 
-def _run_side(profile, side, tree, out, meta) -> None:
+def _run_side(profile, side, tree, out, meta, checked_head) -> None:
     names, log = out / f"{side}_names.txt", out / f"{side}.log"
     before = _head(tree)
+    if before != checked_head:
+        # 방향은 사전 검사 때의 HEAD 로 쟀다 — 그 사이 움직였으면 잰 것과 잴 것이 다르다
+        raise _Stop(EXIT_VOID, f"측정 무효: {side} 트리가 사전 검사 뒤 움직였다 — {checked_head} → {before}")
     meta[f"{side}_tree"] = str(tree)
     meta[f"{side}_head_before"] = before
     meta[f"{side}_start"] = _now()
@@ -121,7 +126,7 @@ def run(base, after, out, root=None) -> int:
         except bp_profile.ProfileError as e:
             raise _Stop(EXIT_CONFIG, "설정 오류: 프로파일\n" + "\n".join(f"  - {p}" for p in e.problems))
         base, after = Path(base).resolve(), Path(after).resolve()
-        _preflight(profile, base, after, out)
+        base_head, after_head = _preflight(profile, base, after, out)
         try:
             out.mkdir(parents=True, exist_ok=True)
         except OSError as e:
@@ -130,8 +135,8 @@ def run(base, after, out, root=None) -> int:
             # 지난 실행의 산출물을 «이번 결과»로 읽지 않는다
             (out / name).unlink(missing_ok=True)
         meta["side_cmd"] = " ".join(profile.side_cmd)
-        _run_side(profile, "base", base, out, meta)
-        _run_side(profile, "after", after, out, meta)  # 곧바로 — 사이에 아무것도 기다리지 않는다
+        _run_side(profile, "base", base, out, meta, base_head)
+        _run_side(profile, "after", after, out, meta, after_head)  # 곧바로 — 사이에 아무것도 기다리지 않는다
         code = _judge(profile, out)
     except _Stop as stop:
         print(str(stop), file=sys.stderr)

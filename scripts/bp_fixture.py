@@ -28,6 +28,7 @@ case "$mode" in
   partial) echo "PARTIAL run" ;;
   nonames) echo "DONE 0 failed"; exit 0 ;;
   commit) git -c user.name=t -c user.email=t@t -c commit.gpgsign=false -C "$tree" commit -q --allow-empty -m moved ;;
+  commit_other) git -c user.name=t -c user.email=t@t -c commit.gpgsign=false -C "$(cat "$tree/other")" commit -q --allow-empty -m moved ;;
 esac
 cp "$tree/failures.txt" "$names"
 echo "DONE $(wc -l < "$names" | tr -d ' ') failed"
