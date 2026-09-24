@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass
 from enum import Enum
 
@@ -147,10 +148,29 @@ def _selftest() -> int:
             continue
         failures.append(f"{args} -> ValueError 가 안 났다 (「안 쟀다」를 FAIL 로 읽었다)")
 
-    # cap 불변식: 1 은 CODE 에만 붙는다.
-    for args, (want_attr, want_cap) in _CASES:
-        if want_cap == 1 and want_attr != "CODE":
-            failures.append(f"cap 불변식 위반: {want_attr} 에 cap 1")
+    # cap 불변식: 1 은 CODE 에만 붙는다 — 기대값 표가 아니라 verdict() «출력»을
+    # 입력 공간 «전수»(2×3⁴=162)로 잰다. 표만 보면 코드가 깨져도 통과한다.
+    tri = (True, False, None)
+    space = itertools.product((True, False), tri, tri, tri, tri)
+    swept = 0
+    for probe_ok, control, cause, symptom, regress in space:
+        swept += 1
+        try:
+            got = verdict(
+                probe_ok=probe_ok,
+                control=control,
+                cause=cause,
+                symptom=symptom,
+                regress=regress,
+            )
+        except ValueError:
+            continue
+        want_cap = 1 if got.attribution is Attribution.CODE else 0
+        if got.cap_delta != want_cap:
+            failures.append(
+                f"cap 불변식 위반: {(probe_ok, control, cause, symptom, regress)} "
+                f"-> {got.attribution.value}/{got.cap_delta}"
+            )
 
     if failures:
         print("selftest FAIL:")
@@ -158,7 +178,10 @@ def _selftest() -> int:
             print(f"  - {f}")
         return 1
 
-    print(f"selftest OK — {len(_CASES)}개 진리표 행 + {len(_MUST_RAISE)}개 ValueError 경로")
+    print(
+        f"selftest OK — {len(_CASES)}개 진리표 행 + {len(_MUST_RAISE)}개 ValueError 경로"
+        f" + cap 불변식 {swept}개 입력 전수"
+    )
     return 0
 
 

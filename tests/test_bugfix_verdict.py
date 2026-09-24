@@ -83,3 +83,29 @@ def test_reason_is_present_for_every_outcome():
         {"probe_ok": True, "control": True, "cause": True, "symptom": True, "regress": True},
     ):
         assert verdict(**kwargs).reason
+
+
+@pytest.mark.parametrize("probe_ok", [True, False])
+@pytest.mark.parametrize("control", [True, False, None])
+@pytest.mark.parametrize("cause", [True, False, None])
+@pytest.mark.parametrize("symptom", [True, False, None])
+@pytest.mark.parametrize("regress", [True, False, None])
+def test_cap_is_one_only_for_code_across_the_whole_input_space(
+    probe_ok, control, cause, symptom, regress
+):
+    """cap 불변식을 입력 공간 «전수»로 고정한다 — 사례 열거가 아니다.
+
+    「cap 은 CODE 만 센다」가 이 진리표의 가장 load-bearing 한 계약이고,
+    6줄 밖의 조합이 새면 나쁜 기준이 예산을 태운다. ValueError 경로는
+    판정을 내지 않으므로 불변식 대상이 아니다.
+    """
+    try:
+        v = verdict(
+            probe_ok=probe_ok, control=control, cause=cause,
+            symptom=symptom, regress=regress,
+        )
+    except ValueError:
+        return
+    assert v.cap_delta == (1 if v.attribution is Attribution.CODE else 0)
+    assert v.cap_delta in (0, 1)
+    assert v.reason

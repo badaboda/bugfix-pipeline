@@ -65,4 +65,7 @@ tests/                           pytest — «개발용». 설치처 검증은 -
 ```sh
 python3 scripts/bugfix_verdict.py --selftest   # 의존 0 — 설치처에서도 이것을 쓴다
 hooks/install.sh verify                        # 훅이 실제로 불리는지 (설치 후)
+
+# 개발용 pytest — 호스트에 pytest 가 없고, 레포 루트가 import 경로에 없어서 두 옵션이 다 필요하다
+uvx --with pytest pytest tests -q -p no:cacheprovider -o pythonpath=.
 ```
