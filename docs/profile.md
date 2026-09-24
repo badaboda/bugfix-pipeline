@@ -51,20 +51,28 @@ python3 <플러그인>/scripts/bp_profile.py check   # exit 0 OK · 2 문제 목
 
 ```sh
 #!/bin/sh
-# bp_side.sh <트리> <이름 출력> — 주어진 트리에서 전체 테스트를 돌리고 실패 id 를 쓴다.
+# bp_side.sh <트리> <이름 출력> — 주어진 트리에서 전체 테스트를 돌리고 실패·오류 id 를 쓴다.
 # stdout 이 곧 로그다 — 프로파일의 ran_fully 가 여기서 요약 줄을 찾는다.
 tree=$1; names=$2
 raw="$names.raw"
-( cd "$tree" && ${BP_PYTEST:-python3 -m pytest} tests -rf -p no:cacheprovider ) > "$raw" 2>&1
+( cd "$tree" && ${BP_PYTEST:-python3 -m pytest} tests -rfE -p no:cacheprovider ) > "$raw" 2>&1
 status=$?
 cat "$raw"
-grep '^FAILED ' "$raw" | sed 's/^FAILED //; s/ - .*//' > "$names"
+# FAILED 만 세면 fixture·setup 오류(ERROR)가 빠진다 — 그것도 «새 빨강»이다
+grep -E '^(FAILED|ERROR) ' "$raw" | sed -E 's/^(FAILED|ERROR) //; s/ - .*//' > "$names"
 rm -f "$raw"
 exit $status
 ```
 
-실측(2026-09-24, pytest 8.4): 실패 1·통과 1 트리에서 이름 파일이 `tests/test_x.py::test_broken`
-한 줄, 요약 줄이 위 `ran_fully` 에 걸림. 수집 오류 트리에서는 `not_fully` 가 걸리고 `ran_fully` 는 안 걸림.
+실측(2026-09-24, pytest 8.4):
+
+- 실패 1·통과 1 트리 → 이름 파일 `tests/test_x.py::test_broken` 한 줄, 요약 줄이 `ran_fully` 에 걸림
+- 실패 1·통과 1·fixture 오류 1 트리 → 이름 파일에 실패와 오류 두 줄. `-rf`·`^FAILED` 만 쓰면 오류가
+  빠지는데 요약 줄(`1 failed, 1 passed, 1 error`)은 여전히 `ran_fully` 에 걸려 — 고친 수정이 fixture 를
+  깨도 초록이 된다
+- 수집 오류 트리 → `not_fully` 가 걸리고 `ran_fully` 는 안 걸림
+
+pytest id 에 ` - ` 가 들어 있으면 이 `sed` 가 잘라 낸다 — 그런 id 를 쓰는 프로젝트는 추출을 바꾼다.
 
 ## 실행
 
