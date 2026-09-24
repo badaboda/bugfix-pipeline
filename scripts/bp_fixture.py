@@ -125,6 +125,12 @@ cat "$1/value.txt"
 """
 
 
+# 화면(URL)으로 재현 — repro.sh <트리> <URL>
+REPRO_URL_SH = """#!/bin/sh
+python3 -c 'import sys,urllib.request;print(urllib.request.urlopen(sys.argv[1]+"/value.txt",timeout=5).read().decode())' "$2"
+"""
+
+
 def make_gate_host(tmp, overrides=None):
     """게이트용 호스트 — value.txt=bad(버그), check.sh(불변식), fake side_cmd, 무시된 작업공간."""
     tmp = Path(tmp).resolve()

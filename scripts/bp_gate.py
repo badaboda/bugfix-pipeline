@@ -26,6 +26,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import bp_profile  # noqa: E402
 import bp_regress  # noqa: E402
+import bp_ui  # noqa: E402
 from bugfix_verdict import Attribution, verdict  # noqa: E402
 
 WORKSPACE_DIR = ".bugfix-pipeline"
@@ -191,7 +192,7 @@ def _read_json(path, problems):
     return data
 
 
-def _argv(value, name, required, problems):
+def _argv(value, name, required, problems, allow_url=False):
     if value is None:
         if required:
             problems.append(f"{name} 가 없다")
@@ -202,12 +203,13 @@ def _argv(value, name, required, problems):
     for tok in value:
         for ph in re.findall(r"\{[^{}]*\}", tok):
             if ph == "{url}":
-                problems.append(f"{name}: {{url}} 은 화면 서버(계획 A3) 이후에 쓸 수 있다")
+                if not allow_url:
+                    problems.append(f"{name}: {{url}} 은 프로파일에 ui 가 있어야 쓸 수 있다")
             elif ph not in PLACEHOLDERS:
                 problems.append(f"{name}: 모르는 자리표시자 {ph}")
 
 
-def _validate_rubric(root, ws, rub, problems):
+def _validate_rubric(root, ws, rub, problems, allow_url):
     """문제를 모으고 동결할 patch 상대경로 목록을 돌려준다."""
     for k in sorted(set(rub) - _RUBRIC_KEYS):
         problems.append(f"rubric 모르는 키: {k}")
@@ -220,8 +222,8 @@ def _validate_rubric(root, ws, rub, problems):
             continue
         for k in sorted(set(r) - {"probe", "assert"}):
             problems.append(f"{row} 모르는 키: {k}")
-        _argv(r.get("probe"), f"{row}.probe", True, problems)
-        _argv(r.get("assert"), f"{row}.assert", False, problems)
+        _argv(r.get("probe"), f"{row}.probe", True, problems, allow_url)
+        _argv(r.get("assert"), f"{row}.assert", False, problems, allow_url)
     patches = []
     ctl = rub.get("R-CONTROL")
     if not isinstance(ctl, dict) or not isinstance(ctl.get("axes"), list) or not ctl["axes"]:
@@ -253,11 +255,11 @@ def _validate_rubric(root, ws, rub, problems):
                 problems.append(f"{name}.mutate.checkout 커밋이 없다: {ref}")
         else:
             problems.append(f'{name}.mutate 는 {{"patch": …}} 또는 {{"checkout": …}} 이어야 한다')
-        _argv(ax.get("alive"), f"{name}.alive", False, problems)
+        _argv(ax.get("alive"), f"{name}.alive", False, problems, allow_url)
     return patches
 
 
-def _validate_frozen_set(root, ws):
+def _validate_frozen_set(root, ws, profile):
     problems = []
     rc = _read_json(ws / ROOT_CAUSE, problems)
     rub = _read_json(ws / RUBRIC, problems)
@@ -269,7 +271,7 @@ def _validate_frozen_set(root, ws):
             problems.append("판정 CANNOT-MEASURE — 동결하지 않는다. to-light --kind cannot-measure 로 이관한다")
         elif v not in ("BUG", "NOT-A-BUG"):
             problems.append(f"root_cause.verdict 가 BUG/NOT-A-BUG 가 아니다: {v!r}")
-    patches = _validate_rubric(root, ws, rub, problems) if rub is not None else []
+    patches = _validate_rubric(root, ws, rub, problems, profile.ui is not None) if rub is not None else []
     if rc is not None and rub is not None and rc.get("cause_id") != rub.get("cause_id"):
         problems.append("root_cause.json 과 rubric.json 의 cause_id 가 다르다")
     if problems:
@@ -359,7 +361,7 @@ def cmd_freeze(root, a):
         raise GateError("정식 트랙에서만 동결한다")
     if led["frozen"] is not None:
         raise GateError("이미 동결됐다 — 바꾸려면 refreeze --reason")
-    cause_id, frozen = _validate_frozen_set(root, ws)
+    cause_id, frozen = _validate_frozen_set(root, ws, _profile(root))
     led.update(cause_id=cause_id, frozen=frozen, phase="P2")
     _save(ws, led)
     print(f"freeze OK — cause_id={cause_id} 파일 {len(frozen)}개")
@@ -371,7 +373,7 @@ def cmd_refreeze(root, a):
     led = _load(ws)
     if led["frozen"] is None:
         raise GateError("아직 동결 전이다 — freeze")
-    cause_id, frozen = _validate_frozen_set(root, ws)
+    cause_id, frozen = _validate_frozen_set(root, ws, _profile(root))
     entry = {"kind": "refreeze", "reason": a.reason, "at": _now(),
              "from_cause": led["cause_id"], "to_cause": cause_id}
     if cause_id != led["cause_id"]:
@@ -513,19 +515,37 @@ def _exec_prefix(profile):
     return [sys.executable, str(HERE / "bp_exec_local.py")]
 
 
-def _expand(argv, profile, tree, out, ws):
+def _expand(argv, profile, tree, out, ws, url=None):
     res = []
     for tok in argv:
         if tok == "{exec}":
             res.extend(_exec_prefix(profile))
             continue
-        res.append(tok.replace("{tree}", str(tree)).replace("{out}", str(out)).replace("{repro}", str(ws / REPRO_SH)))
+        res.append(tok.replace("{tree}", str(tree)).replace("{out}", str(out))
+                   .replace("{repro}", str(ws / REPRO_SH)).replace("{url}", url or ""))
     return res
 
 
+def _needs_url(row):
+    return any("{url}" in tok for key in ("probe", "assert") for tok in row.get(key) or [])
+
+
 def _run_row(profile, root, ws, row, tree, out):
+    """{url} 이 든 행은 «그 트리»로 앱을 띄워 잰다 — 사본은 사본의 코드를 서빙해야 한다."""
+    if not _needs_url(row):
+        return _run_row_at(profile, root, ws, row, tree, out, None)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with bp_ui.serve(profile, tree, out.with_suffix(".serve.log")) as url:
+            return _run_row_at(profile, root, ws, row, tree, out, url)
+    except bp_ui.UiError as e:
+        out.write_text(f"화면 서버: {e}\n")
+        return False, None, {"probe": row["probe"], "ui_error": str(e), "out": str(out)}
+
+
+def _run_row_at(profile, root, ws, row, tree, out, url):
     """(ran, passed, record). ran=False 는 «돌지 못했다»(125 · 실행 실패) — probe_ok=False."""
-    probe = _expand(row["probe"], profile, tree, out, ws)
+    probe = _expand(row["probe"], profile, tree, out, ws, url=url)
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "wb") as f:
         try:
@@ -538,7 +558,7 @@ def _run_row(profile, root, ws, row, tree, out):
         return False, None, rec
     if "assert" not in row:
         return True, pr == 0, rec
-    argv = _expand(row["assert"], profile, tree, out, ws)
+    argv = _expand(row["assert"], profile, tree, out, ws, url=url)
     try:
         ar = subprocess.run(argv, cwd=str(root), capture_output=True).returncode
     except OSError:
