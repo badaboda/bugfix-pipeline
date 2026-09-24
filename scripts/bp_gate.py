@@ -657,6 +657,128 @@ def cmd_record_sweep(root, a):
     return _judge(ws, led, _head(root), args, {"R-REGRESS": {"sweep_evidence": str(ev)}}, "sweep")
 
 
+def cmd_light_verify(root, a):
+    ws = _ws(root, a.slug)
+    led = _load(ws)
+    if led["track"] != "light":
+        raise GateError("가벼운 트랙이 아니다")
+    profile = _profile(root)
+    head, base = _head(root), led["base_sha"]
+    if head == base:
+        raise GateError("수정 커밋이 없다 — 가벼운 트랙도 «커밋된» 트리를 잰다")
+    vdir = ws / f"light_{len(led['light_verifications']) + 1}"
+    vdir.mkdir()
+    observed = _repro_fields(ws).get("observed", "")
+    rec = {"head": head, "at": _now(), "repro": None, "regress": None}
+    if (ws / REPRO_SH).is_file() and observed:
+        if led["triage"]["deterministic"]:
+            try:
+                with _copy(root, profile, base) as cp:
+                    b_exit, b_out = _run_repro(profile, root, ws, cp)
+            except _CopyFailed as e:
+                b_exit, b_out = ENV_FAILED, str(e)
+            a_exit, a_out = _run_repro(profile, root, ws, root)
+            (vdir / "repro_before.out").write_text(b_out)
+            (vdir / "repro_after.out").write_text(a_out)
+            rec["repro"] = {"mode": "deterministic", "before_exit": b_exit, "before_observed": observed in b_out,
+                            "after_exit": a_exit, "after_observed": observed in a_out}
+        else:
+            exits, hits = [], 0
+            for i in range(LIGHT_REPRO_RUNS):
+                code, out = _run_repro(profile, root, ws, root)
+                (vdir / f"repro_{i}.out").write_text(out)
+                exits.append(code)
+                hits += observed in out
+            rec["repro"] = {"mode": "repeated", "runs": LIGHT_REPRO_RUNS, "observed_hits": hits, "exits": exits}
+    if profile.regress is not None:
+        try:
+            with _copy(root, profile, base) as cp:
+                code = bp_regress.run(cp, root, vdir / "regress", root=root,
+                                      base_cache=ws / "baseline_cache" / base)
+        except _CopyFailed:
+            code = bp_regress.EXIT_VOID
+        red_file = vdir / "regress" / "new_red.txt"
+        rec["regress"] = {"exit": code,
+                          "new_red": red_file.read_text().split() if code == 1 and red_file.is_file() else []}
+    led["light_verifications"].append(rec)
+    led["phase"] = "L-verified"
+    _save(ws, led)
+    print(f"light-verify — repro={rec['repro'] and rec['repro']['mode']} regress={rec['regress'] and rec['regress']['exit']}")
+    return EXIT_OK
+
+
+def _light_labels(led):
+    last = led["light_verifications"][-1] if led["light_verifications"] else None
+    repro = last and last["repro"]
+    clean = bool(
+        repro and repro["mode"] == "deterministic"
+        and repro["before_observed"] and repro["before_exit"] != ENV_FAILED
+        and not repro["after_observed"] and repro["after_exit"] != ENV_FAILED
+    )
+    unstable = any(c["to"] == "light" and c["kind"] in ("cannot-measure", "unstable") for c in led["track_changes"])
+    labels = []
+    if not clean or unstable:
+        labels.append(LABEL_NO_DETERMINISM)
+    reg = last and last["regress"]
+    if not reg or reg["exit"] not in (0, 1):
+        labels.append(LABEL_NO_REGRESS)
+    return labels
+
+
+def _changed_files(root, base):
+    return _git(root, "diff", "--name-only", f"{base}..HEAD", check=True).stdout.split()
+
+
+def cmd_light_report(root, a):
+    ws = _ws(root, a.slug)
+    led = _load(ws)
+    if led["track"] != "light":
+        raise GateError("가벼운 트랙이 아니다")
+    last = led["light_verifications"][-1] if led["light_verifications"] else None
+    if last and last["head"] != _head(root):
+        raise GateError("light-verify 이후 커밋이 더 있다 — 검증이 낡았다. light-verify 를 다시")
+    labels = _light_labels(led)
+    changed = _changed_files(root, led["base_sha"])
+    cause = json.loads((ws / LIGHT_CAUSE).read_text()) if (ws / LIGHT_CAUSE).is_file() else {}
+    # 🔴 PR 본문은 명령 출력 원문을 읽지 않는다 — 판정·종료코드·이름·표지·파일 목록만
+    body = [f"## 버그 수정 — {led['slug']}", "", "트랙: 가벼운", f"표지: {', '.join(labels) or '없음'}"]
+    if cause.get("file"):
+        body.append(f"원인: `{cause['file']}:{cause.get('line', '?')}` — {cause.get('summary', '')}")
+    if last and last["repro"]:
+        r = last["repro"]
+        if r["mode"] == "deterministic":
+            body.append(f"재현: 수정 전 재현={r['before_observed']}(exit {r['before_exit']}) · "
+                        f"수정 후 재현={r['after_observed']}(exit {r['after_exit']})")
+        else:
+            body.append(f"재현: {r['runs']}회 중 {r['observed_hits']}회 관측 (비결정)")
+    if last and last["regress"]:
+        g = last["regress"]
+        body.append(f"회귀: exit {g['exit']}" + (f" · 새 빨강 {', '.join(g['new_red'])}" if g["new_red"] else ""))
+    body += ["", "변경 파일:"] + [f"- `{f}`" for f in changed]
+    (ws / PR_BODY).write_text("\n".join(body) + "\n", encoding="utf-8")
+    report = body + ["", "---", "로컬 전용 — 원문 발췌"]
+    vdir = ws / f"light_{len(led['light_verifications'])}"
+    for f in sorted(vdir.glob("*.out")) if last else []:
+        report += ["", f"### {f.name}", "```", f.read_text()[-2000:], "```"]
+    (ws / LIGHT_REPORT).write_text("\n".join(report) + "\n", encoding="utf-8")
+    print(f"light-report — 표지: {', '.join(labels) or '없음'} · {ws / LIGHT_REPORT}")
+    return EXIT_OK
+
+
+def _formal_pr_body(root, ws, led):
+    rc = json.loads((ws / ROOT_CAUSE).read_text()) if (ws / ROOT_CAUSE).is_file() else {}
+    judged = [h for h in led["history"] if h.get("kind") in ("run", "sweep")]
+    changed = _changed_files(root, led["baseline_sha"]) if led["baseline_sha"] else []
+    off = sorted(set(changed) - set(rc.get("fix_scope", [])) - set(led["red_files"] or {}))
+    lines = [f"## 버그 수정 — {led['slug']}", "", "트랙: 정식",
+             f"원인: `{rc.get('file')}:{rc.get('line')}` (cause_id {led['cause_id']})",
+             f"판정: {' → '.join(h['attribution'] for h in judged) or '없음'} · 루프 {led['code_count']}/{CAP}",
+             f"원인 교체: {len(led['cause_changes'])}",
+             f"RED 커밋: {(led['red_commit'] or '')[:7]}",
+             f"카드 밖 변경 파일: {', '.join(off) or '0'}"]
+    return "\n".join(lines) + "\n"
+
+
 def cmd_status(root, a):
     ws = _ws(root, a.slug)
     led = _load(ws)
@@ -668,6 +790,14 @@ def cmd_status(root, a):
     print(f"  cause_id={led['cause_id']} 원인 교체={len(led['cause_changes'])} 트랙 변경={len(led['track_changes'])}")
     for h in judged:
         print(f"  #{h['n']} {h['kind']} {h['attribution']}{' (환불)' if h.get('refunded') else ''} @ {h['head'][:7]}")
+    if a.pr_body:
+        if led["track"] != "formal":
+            raise GateError("가벼운 트랙의 PR 본문은 light-report 가 쓴다")
+        (ws / PR_BODY).write_text(_formal_pr_body(root, ws, led), encoding="utf-8")
+        print(f"pr_body: {ws / PR_BODY}")
+    last2 = [h["attribution"] for h in led["history"] if h.get("kind") == "run"][-2:]
+    if len(last2) == 2 and set(last2) <= {"VOID", "ENV"}:
+        print("  제안: VOID/ENV 연속 2회 — to-light --kind unstable 이관을 사용자에게")
     return EXIT_OK
 
 
@@ -679,6 +809,11 @@ def _parser():
     s = sub.add_parser("status")
     s.add_argument("slug")
     s.add_argument("--close", choices=sorted(_CLOSED))
+    s.add_argument("--pr-body", action="store_true")
+    s = sub.add_parser("light-verify")
+    s.add_argument("slug")
+    s = sub.add_parser("light-report")
+    s.add_argument("slug")
     s = sub.add_parser("triage")
     s.add_argument("slug")
     s.add_argument("--light", action="store_true")
@@ -710,7 +845,8 @@ def _parser():
 COMMANDS = {"init": cmd_init, "status": cmd_status, "triage": cmd_triage,
             "promote": cmd_promote, "to-light": cmd_to_light,
             "freeze": cmd_freeze, "refreeze": cmd_refreeze, "baseline": cmd_baseline,
-            "run": cmd_run, "record-sweep": cmd_record_sweep}
+            "run": cmd_run, "record-sweep": cmd_record_sweep,
+            "light-verify": cmd_light_verify, "light-report": cmd_light_report}
 
 
 def main(argv) -> int:

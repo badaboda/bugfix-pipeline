@@ -189,3 +189,16 @@ def fix_commit(root, red_sha, value="good", body=None, subject="fix: value 를 g
     msg = subject + "\n\n" + (body if body is not None else f"RED: {red_sha}")
     git(root, "commit", "-q", "--allow-empty", "-m", msg)
     return git(root, "rev-parse", "HEAD")
+
+
+def light_ready(tmp, repro=REPRO_SH_TEXT, overrides=None):
+    root = make_gate_host(tmp, overrides)
+    ws = root / ".bugfix-pipeline" / "b1"
+    gate(root, "init", "b1")
+    (ws / "repro.md").write_text("steps: 화면\nobserved: bad\nwhere: 로컬\nexpected_after: good\n")
+    args = ["triage", "b1", "--light"]
+    if repro is not None:
+        (ws / "repro.sh").write_text(repro)
+        args.append("--repro-confirmed")
+    gate(root, *args)
+    return root, ws
