@@ -268,6 +268,69 @@ def _validate_frozen_set(root, ws):
     return rub["cause_id"], {f: _sha256(ws / f) for f in files}
 
 
+_FEAT_FIX = re.compile(r"^(feat|fix)(\(|!|:)")
+
+
+def cmd_baseline(root, a):
+    ws = _ws(root, a.slug)
+    led = _load(ws)
+    if led["frozen"] is None:
+        raise GateError("동결 후에 기준선을 잡는다 — freeze 먼저")
+    base = led["base_sha"]
+    log = _git(root, "log", "--format=%H", "--reverse", f"{base}..HEAD", "--", *a.red, check=True).stdout.split()
+    if not log:
+        raise GateError(f"{base[:7]}..HEAD 에 RED 파일을 건드린 커밋이 없다")
+    red = log[0]
+    blobs = {}
+    for f in a.red:
+        r = _git(root, "rev-parse", f"HEAD:{f}")
+        if r.returncode:
+            raise GateError(f"RED 파일이 HEAD 에 없다: {f}")
+        blobs[f] = r.stdout.strip()
+    led.update(baseline_sha=_git(root, "rev-parse", f"{red}^", check=True).stdout.strip(),
+               red_commit=red, red_files=blobs, phase="P3")
+    _save(ws, led)
+    print(f"baseline OK — 기준선 {led['baseline_sha'][:7]} · RED {red[:7]}")
+    return EXIT_OK
+
+
+def _audit_commits(root, led):
+    """feat/fix 커밋은 본문에 «기준선 이후의 다른 커밋»을 가리키는 RED: <sha> 가 있어야 한다."""
+    base = led["baseline_sha"]
+    in_range = _git(root, "rev-list", f"{base}..HEAD", check=True).stdout.split()
+    raw = _git(root, "log", "--format=%H%x1f%s%x1f%b%x1e", f"{base}..HEAD", check=True).stdout
+    problems = []
+    for rec in raw.split("\x1e"):
+        if not rec.strip():
+            continue
+        sha, subject, body = (rec.strip("\n").split("\x1f") + ["", ""])[:3]
+        if not _FEAT_FIX.match(subject):
+            continue
+        reds = re.findall(r"^RED: ([0-9a-f]{7,40})\s*$", body, re.M)
+        ok = any(
+            any(c.startswith(r) and c != sha for c in in_range) and not sha.startswith(r)
+            for r in reds
+        )
+        if not ok:
+            problems.append(f"{sha[:7]} {subject!r} — 본문에 기준선 이후 다른 커밋의 RED: <sha> 가 없다")
+    if problems:
+        raise GateError("커밋 감사:\n" + "\n".join(f"  - {p}" for p in problems))
+
+
+def _check_tamper(root, ws, led):
+    problems = []
+    for rel, sha in led["frozen"].items():
+        p = ws / rel
+        if not p.is_file() or _sha256(p) != sha:
+            problems.append(f"동결 파일이 바뀌었다: {rel}")
+    for rel, blob in (led["red_files"] or {}).items():
+        r = _git(root, "rev-parse", f"HEAD:{rel}")
+        if r.returncode or r.stdout.strip() != blob:
+            problems.append(f"RED 테스트가 바뀌었다: {rel}")
+    if problems:
+        raise GateError("변조:\n" + "\n".join(f"  - {p}" for p in problems))
+
+
 def cmd_freeze(root, a):
     ws = _ws(root, a.slug)
     led = _load(ws)
@@ -418,12 +481,15 @@ def _parser():
     s.add_argument("slug")
     s.add_argument("--reason", required=True)
     s.add_argument("--refund-last", action="store_true")
+    s = sub.add_parser("baseline")
+    s.add_argument("slug")
+    s.add_argument("--red", nargs="+", required=True)
     return p
 
 
 COMMANDS = {"init": cmd_init, "status": cmd_status, "triage": cmd_triage,
             "promote": cmd_promote, "to-light": cmd_to_light,
-            "freeze": cmd_freeze, "refreeze": cmd_refreeze}
+            "freeze": cmd_freeze, "refreeze": cmd_refreeze, "baseline": cmd_baseline}
 
 
 def main(argv) -> int:

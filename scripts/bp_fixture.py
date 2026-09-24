@@ -174,3 +174,18 @@ def formal_ready(tmp, rubric=None, overrides=None):
     (ws / "control").mkdir()
     (ws / "control" / "broken.diff").write_text(BROKEN_PATCH)
     return root, ws
+
+
+def red_commit(root):
+    (Path(root) / "tests" / "red.sh").write_text("sh check.sh\n")
+    git(root, "add", "tests/red.sh")
+    git(root, "commit", "-q", "-m", "test: RED — value 불변식")
+    return git(root, "rev-parse", "HEAD")
+
+
+def fix_commit(root, red_sha, value="good", body=None, subject="fix: value 를 good 으로"):
+    (Path(root) / "value.txt").write_text(value + "\n")
+    git(root, "add", "value.txt")
+    msg = subject + "\n\n" + (body if body is not None else f"RED: {red_sha}")
+    git(root, "commit", "-q", "--allow-empty", "-m", msg)
+    return git(root, "rev-parse", "HEAD")
