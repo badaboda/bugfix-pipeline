@@ -72,22 +72,33 @@ v1 템플릿에는 `serve_cmd` 가 없다.
   것을 공유하거나 설치한다. 템플릿의 방식:
 
   ```sh
-  # templates/pytest/bp_exec.sh — 트리의 .venv, 없으면 호출 루트의 .venv
-  root=$(pwd)
+  # templates/pytest/bp_exec.sh — 트리의 .venv, 없으면 호출 루트의 .venv + 사본 소스를 앞에
   if [ -d "$tree/.venv" ]; then
-    PATH="$tree/.venv/bin:$PATH"; export PATH
+    PATH="$tree/.venv/bin:$PATH"
   elif [ -d "$root/.venv" ]; then
-    PATH="$root/.venv/bin:$PATH"; export PATH
+    PATH="$root/.venv/bin:$PATH"
+    PYTHONPATH="$tree/src:$tree${PYTHONPATH:+:$PYTHONPATH}"; export PYTHONPATH
+  else
+    exit 125
   fi
   ```
 
   ```sh
-  # templates/vitest/bp_exec.sh — 사본에 호출 루트의 node_modules 를 링크(사본은 폐기된다)
+  # templates/vitest/bp_exec.sh — 사본에 호출 루트의 node_modules 를 링크(사본은 폐기된다). 워크스페이스는 거부
   if [ ! -e "$tree/node_modules" ] && [ -d "$root/node_modules" ]; then
+    if [ -f "$tree/pnpm-workspace.yaml" ] || grep -q '"workspaces"' "$tree/package.json" 2>/dev/null; then
+      exit 125
+    fi
     ln -s "$root/node_modules" "$tree/node_modules" || exit 125
   fi
   ```
 
+- 🔴 **빌린 의존성이 «루트» 코드를 가리키면 사본이 루트 코드를 잰다 — 거짓 초록이다.** 실측된 두 경우:
+  - Python editable 설치(`uv sync` 기본): `.pth` 가 루트 소스를 가리킨다 → 템플릿이 사본의 `src`·트리를
+    `PYTHONPATH` 앞에 둔다. **비-editable 로 프로젝트를 venv 에 설치하면 이것으로도 못 막는다.**
+  - npm/yarn/pnpm 워크스페이스: 루트 `node_modules` 의 워크스페이스 링크가 루트 패키지를 가리킨다 → 템플릿이
+    **거부(125)** 한다. 워크스페이스 레포는 사본에 직접 설치하는 `exec` 를 쓴다.
+- 템플릿 래퍼는 명령을 찾지 못하면 125 다(`command -v`). pytest 템플릿은 `.venv` 가 어디에도 없어도 125.
 - 기본값 `bp_exec_local` 은 사본 의존성을 해결하지 않는다. 그런 프로젝트는 `exec` 를 둔다.
 
 ## `regress.side_cmd` 계약
@@ -109,11 +120,14 @@ v1 템플릿에는 `serve_cmd` 가 없다.
 
 ## 템플릿 (실측한 것만)
 
-| 스택 | 경로 | 실측 (2026-09-25, 루트와 `git worktree` 사본 동일) |
+| 스택 | 경로 | 실측 (2026-09-25) |
 |---|---|---|
-| pytest | `templates/pytest/` | 실패1·통과1·fixture 오류1 → 이름 2줄, 요약 줄이 `ran_fully` 에 걸림. 수집 오류 → `not_fully` 로 무효 |
-| vitest | `templates/vitest/` | 실패1·파일 오류1 → 이름 2줄(상대경로), `Test Files` 줄이 `ran_fully` 에 걸림. 파일 오류만 있어도 걸림 |
-| go | — | 측정 환경이 없어 템플릿 없음 |
+| pytest | `templates/pytest/` | 루트·사본: 실패1·통과1·fixture 오류1 → 이름 2줄, 요약 줄이 `ran_fully` 에 걸림. 수집 오류 → `not_fully` 로 무효. **기준선 통과·수정 후 실패(src 레이아웃 editable)** → `bp_regress` 1 |
+| vitest | `templates/vitest/` | 루트·사본: 실패1·파일 오류1 → 이름 2줄(상대경로), `Test Files` 줄이 `ran_fully` 에 걸림(파일 오류만 있어도). **수정 후 처리되지 않은 에러** → `not_fully` 로 무효(초록 아님) |
+| go · jest | — | 측정하지 않아 템플릿 없음 |
+
+«기준선 통과·수정 후 실패» 대조는 `tests/test_templates.py` 에 있다(uv·npm 이 있을 때 돈다). 루트와 사본에 같은
+코드를 두고 「이름이 같다」를 보는 측정은 사본이 루트 코드를 새어 읽어도 똑같이 나오므로 대조가 아니다.
 
 pytest id 에 ` - ` 가 들어 있으면 pytest 템플릿의 `sed` 가 잘라 낸다 — 그런 id 를 쓰는 프로젝트는 추출을 바꾼다.
 

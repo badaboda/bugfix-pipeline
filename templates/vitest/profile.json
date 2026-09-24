@@ -4,6 +4,7 @@
   "regress": {
     "side_cmd": [".claude/bugfix-pipeline/bp_side.sh"],
     "ran_fully": "^ +Test Files +",
+    "not_fully": "Unhandled (Errors?|Rejection)",
     "tree_marker": "__SIGNAL__"
   }
 }
