@@ -1,0 +1,10 @@
+{
+  "schema": 2,
+  "exec": { "exec_cmd": [".claude/bugfix-pipeline/bp_exec.sh"] },
+  "regress": {
+    "side_cmd": [".claude/bugfix-pipeline/bp_side.sh"],
+    "ran_fully": "^=+ .*[0-9]+ (passed|failed|errors?)",
+    "not_fully": "Interrupted|INTERNALERROR",
+    "tree_marker": "__SIGNAL__"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "schema": 2,
+  "exec": { "exec_cmd": [".claude/bugfix-pipeline/bp_exec.sh"] },
+  "regress": {
+    "side_cmd": [".claude/bugfix-pipeline/bp_side.sh"],
+    "ran_fully": "^ +Test Files +",
+    "tree_marker": "__SIGNAL__"
+  }
+}
