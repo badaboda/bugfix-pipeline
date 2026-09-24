@@ -849,7 +849,43 @@ COMMANDS = {"init": cmd_init, "status": cmd_status, "triage": cmd_triage,
             "light-verify": cmd_light_verify, "light-report": cmd_light_report}
 
 
+def _selftest() -> int:
+    """설치처용 — 정식 트랙 한 바퀴(CODE→PASS) · 변조 · 가벼운 트랙 표지를 임시 레포에서 돌린다."""
+    import bp_fixture as fx
+    failures = []
+
+    def expect(name, got, want):
+        if got != want:
+            failures.append(f"{name}: 기대 {want!r}, 실제 {got!r}")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root, ws = fx.formal_ready(Path(tmp) / "a")
+        expect("freeze", fx.gate(root, "freeze", "b1"), 0)
+        red = fx.red_commit(root)
+        expect("baseline", fx.gate(root, "baseline", "b1", "--red", "tests/red.sh"), 0)
+        expect("수정 전 run = CODE", fx.gate(root, "run", "b1"), 1)
+        fx.fix_commit(root, red)
+        expect("수정 후 run = PASS", fx.gate(root, "run", "b1"), 0)
+        (ws / "rubric.json").write_text((ws / "rubric.json").read_text() + " ")
+        expect("변조 = 2", fx.gate(root, "run", "b1"), 2)
+    with tempfile.TemporaryDirectory() as tmp:
+        root, ws = fx.light_ready(Path(tmp) / "b", overrides={"regress": None})
+        (root / "value.txt").write_text("good\n")
+        fx.git(root, "commit", "-q", "-am", "fix: value")
+        expect("light-verify", fx.gate(root, "light-verify", "b1"), 0)
+        expect("표지", _light_labels(fx.ledger(root, "b1")), [LABEL_NO_REGRESS])
+    if failures:
+        print("selftest FAIL:")
+        for f in failures:
+            print(f"  - {f}")
+        return 1
+    print("selftest OK — 정식 한 바퀴(CODE→PASS) · 변조 · 가벼운 트랙 표지")
+    return 0
+
+
 def main(argv) -> int:
+    if argv == ["--selftest"]:
+        return _selftest()
     try:
         a = _parser().parse_args(argv)
     except SystemExit as e:
