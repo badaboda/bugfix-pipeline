@@ -56,6 +56,15 @@
    리더는 한 번 돌린 출력을 사용자에게 보이고 **「이게 내가 본 것」 확인**을 받는다 — 확인 전에는 트리아지에
    쓰지 않는다. 옮기지 못하면(외부 결제 · 실기기 · 운영 데이터 전용 등) 사유를 `repro.md` 에 적고 넘어간다.
    사용자에게 보이는 버그 대부분이 화면 버그이므로, 이 단계가 없으면 정식 트랙이 거의 쓰이지 않는다.
+
+   **`repro.sh` 계약** — 작업공간(`.bugfix-pipeline/<slug>/repro.sh`, 무시 경로)에 산다. 사본에는 무시된 파일이
+   없으므로 **트리 안에서 찾지 않고 절대경로로 부른다**(자리표시자 `{repro}`).
+   - 호출: `repro.sh <트리 절대경로> [<URL>]`. 재현이 앱 화면을 요구하면 두 번째 인자로 URL 을 받는다.
+   - URL 은 `bp_ui.py serve` 가 **그 트리로** 띄운 앱의 것이다 — 사용자 개발 서버는 작업 트리만 서빙하므로
+     기준선 사본을 잴 수 없다.
+   - `ui` 가 없는데 화면이 필요한 재현이면: 현재 트리는 사용자가 준 URL 로 잴 수 있지만 **기준선 사본은 잴 수
+     없다.** 이때 「수정 전 재현」은 P0 의 확인 기록으로 대신하고 `기준선 미재현` 표지를 남긴다. 트리아지는 이
+     재현을 «결정적»으로 치지 않는다(정식 트랙의 `R-SYMPTOM` 사본 측정이 불가능하므로).
 4. `bp_gate triage <slug>` — **재서** 트랙을 가른다.
 
    | 신호 | 재는 법 |
@@ -115,13 +124,16 @@ P6 PR      경로 지정 커밋 · push · PR (포지 CLI 가 없으면 가지 +
    | 축 | 조건 | `light-verify` 가 하는 일 | 못 하면 표지 |
    |---|---|---|---|
    | 재현 | 확인된 `repro.sh` 가 있고 결정적 | 기준선 사본과 현재 트리에서 각각 실행 — 수정 전 재현 · 수정 후 사라짐 | — |
+   | 재현 | 화면 재현인데 `ui` 없음 | 현재 트리만(사용자 URL) — 수정 후 사라짐 | `기준선 미재현` |
    | 재현 | 비결정 · 명령 없음 | 현재 트리에서 N 회(기본 5) 실행해 재현 횟수를 기록(명령이 있을 때) | `결정론 판정 없음` |
    | 회귀 | 프로파일 `regress` 있음 | `bp_regress` 1 회(기준선 캐시) | 새 빨강이 있으면 GATE L 에 그대로 올린다 |
    | 회귀 | `regress` 없음 | — | `회귀 미검증` |
 
    결과는 `ledger.json` 의 `light_verifications[]` 에 명령 · 종료코드 · 출력 파일로 남는다.
 4. `bp_gate light-report <slug>` 는 **`light_verifications[]` 만 보고** 표지를 계산하고, 원인 · diff · 검증 결과 ·
-   표지를 `light_report.md` 와 PR 본문 초안으로 쓴다. 한 번도 돌지 않은 축은 자동으로 표지가 된다 — 에이전트
+   표지를 `light_report.md` 와 PR 본문 초안(`pr_body.md`)으로 쓴다. 🔴 **PR 본문에는 명령 출력 원문을 넣지 않는다**
+   — 판정 · 종료코드 · 실패 이름 목록 · 표지만. 출력에는 토큰 · `.env` 값 · 내부 URL 이 섞일 수 있다(원천
+   실측: 스크린샷에 구독 토큰). 원문은 작업공간(무시 경로)에만 남고, `light_report.md`(로컬 전용)만 원문 발췌를 담는다. 한 번도 돌지 않은 축은 자동으로 표지가 된다 — 에이전트
    보고로 표지를 지울 수 없다. 마지막 `light-verify` 이후 커밋이 더 있으면 exit 2(검증이 낡았다).
 5. **GATE L** — `light_report.md` 를 그대로 보이고 승인을 받는다. 승인 전에는 PR 을 만들지 않는다.
    (`light-verify` 는 커밋된 트리를 재므로 수정 커밋은 작업 가지에 먼저 있다. 승인이 거부되면 가지를 버린다.)
@@ -141,6 +153,10 @@ P6 PR      경로 지정 커밋 · push · PR (포지 CLI 가 없으면 가지 +
 - P6 포지: `gh`(GitHub) 또는 `glab`(GitLab) 이 있고 원격이 그 포지를 가리키면 PR/MR 을 만든다. 아니면 가지를
   push 하고(원격이 있으면) PR 본문을 `pr_body.md` 로 남긴 뒤 **멈춰서 알린다** — 포지를 추측하지 않는다.
 - **어떤 종료 경로에서든** 사본·서버 정리, 훅을 설치했다면 uninstall.
+- **PR 본문 위생(두 트랙 공통)** — PR·MR 본문은 `bp_gate` 가 만드는 `pr_body.md` 만 쓰고, 그 생성기는 명령 출력
+  파일의 내용을 읽지 않는다(테스트로 고정 — §13). 정식 트랙의 GATE 2 요약도 같은 규칙.
+- **한 워크트리에 버그 하나.** `init` 은 같은 워크트리에 진행 중인(`P6` 이전) 다른 slug 가 있으면 exit 2. 동시 처리는
+  중량 경로의 몫이다(범위 밖).
 
 ## 4. 프로파일 schema 2
 
@@ -177,7 +193,7 @@ P6 PR      경로 지정 커밋 · push · PR (포지 CLI 가 없으면 가지 +
 {
   "cause_id": "label-01",
   "R-CAUSE":   { "probe": ["{exec}", "{tree}", "--", "pytest", "tests/test_label.py::test_shows_year", "-q"] },
-  "R-SYMPTOM": { "probe": ["{exec}", "{tree}", "--", "sh", "repro.sh"],
+  "R-SYMPTOM": { "probe": ["{exec}", "{tree}", "--", "sh", "{repro}", "{tree}", "{url}"],
                  "assert": ["grep", "-q", "기대 문구", "{out}"] },
   "R-CONTROL": { "axes": [
       { "name": "라벨 제거", "mutate": { "patch": "control/label.diff" },
@@ -186,7 +202,9 @@ P6 PR      경로 지정 커밋 · push · PR (포지 CLI 가 없으면 가지 +
 ```
 
 - 자리표시자: `{exec}` → `exec_cmd` argv 로 펼침 · `{tree}` → 측정 트리 절대경로 · `{out}` → 그 행 probe 의
-  stdout+stderr 파일. 그 밖의 `{…}` 는 `freeze` 가 거부한다.
+  stdout+stderr 파일 · `{repro}` → 작업공간 `repro.sh` 절대경로 · `{url}` → 그 행을 재는 동안 `bp_ui.py serve` 가
+  **그 트리로** 띄운 앱의 URL(`{url}` 이 있는 행은 `bp_gate` 가 측정 전후로 서버를 띄우고 내린다 — `ui` 가 없으면
+  `freeze` 가 거부). 그 밖의 `{…}` 는 `freeze` 가 거부한다.
 - `assert` 가 없으면 probe 종료코드 == 0 이 assert 다. 원천의 `extract` 는 `assert` 명령 하나로 합친다.
 - `R-CONTROL.axes[]` — 축마다 사본에 `mutate` 적용 → `R-CAUSE` 의 probe·assert 실행 → **assert 가 빨개져야**
   그 축 통과. `alive`(선택)는 변이 후에도 **초록이어야** 한다. `mutate` 는
@@ -225,6 +243,8 @@ P6 PR      경로 지정 커밋 · push · PR (포지 CLI 가 없으면 가지 +
 5. **기준선 캐시** — `R-REGRESS` 의 기준선 쪽 결과(이름 파일 · 로그 · META)를 `baseline_cache/<기준선 sha>/`
    에 두고 다음 루프에서 재사용한다. 캐시는 **프로파일 `regress` 섹션의 해시**가 같을 때만 유효하다(래퍼·패턴이
    바뀌면 분모가 바뀐다). `bp_regress` 에 «기준선 결과 디렉토리를 받는» 입력을 더한다.
+   **`R-CONTROL` 캐시** — 결과를 `(HEAD, rubric 동결 해시, 프로파일 exec 해시)` 로 저장하고 같은 키면 재사용한다.
+   GREEN 루프가 HEAD 를 바꾸면 다시 잰다. 무거운 프로젝트에서 판정마다 사본 조립을 반복하지 않는다.
 6. `verdict()` → `code_count += cap_delta` → 이력 → `verdict_<n>.json`(행별 명령 · 종료코드 · 출력 파일).
 7. 사본은 `finally` 에서 폐기 + `git worktree prune`.
 
@@ -333,6 +353,10 @@ P6 PR      경로 지정 커밋 · push · PR (포지 CLI 가 없으면 가지 +
 | 이관 | `CANNOT-MEASURE` · `VOID`/`ENV` 연속 2 회 · GATE 1 크기 강등 — 각 `to-light` 기록 |
 | 무설정 | 프로파일 없는 레포에서 `init` → `triage` → 가벼운 트랙 끝까지 |
 | 기준선 캐시 | 같은 sha 재사용 · `regress` 해시 변경 시 무효 · 캐시 손상 시 재측정 |
+| `R-CONTROL` 캐시 | 같은 키 재사용 · HEAD 변경 시 재측정 |
+| `repro.sh` | `{repro}` 절대경로 호출이 사본에서 동작 · `{url}` 행의 서버 기동·정리 · `ui` 없는 화면 재현 → `기준선 미재현` |
+| PR 본문 위생 | 출력 파일에 심은 표지 문자열(가짜 토큰)이 `pr_body.md` 에 나오지 않는다 |
+| 한 워크트리 한 버그 | 진행 중 slug 가 있으면 `init` exit 2 |
 | `bp_ui.py serve` | 가짜 서버로 준비 대기 · 타임아웃 · 프로세스 그룹 종료 |
 | 프로파일 schema 2 | 기존 테스트 이관 + `exec`·`ui` 거부 경로 · `regress` 없음 허용 |
 | `bp_profile.py init` | 스택 신호별 초안 · 초안이 `check` 에 거부됨 · 기존 파일 보존 · 신호 0/2+ |
