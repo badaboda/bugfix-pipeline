@@ -9,7 +9,9 @@
 """
 from __future__ import annotations
 
+import hashlib
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -24,6 +26,25 @@ import bp_profile  # noqa: E402
 EXIT_CONFIG = 2
 EXIT_VOID = 3
 _DIFF_FILES = ("base_names.txt", "after_names.txt", "base.log", "after.log", "new_red.txt")
+_BASE_FILES = ("base_names.txt", "base.log")
+
+
+def regress_hash(reg) -> str:
+    """분모를 바꾸는 것 — regress 설정과 side_cmd 래퍼 내용. 바뀌면 기준선 캐시가 무효다."""
+    h = hashlib.sha256(repr(reg).encode())
+    first = Path(reg.side_cmd[0]) if reg.side_cmd else None
+    if first and first.is_file():
+        h.update(first.read_bytes())
+    return h.hexdigest()
+
+
+def _cached_base(cache, base_head, reg):
+    if cache is None or not all((cache / n).is_file() for n in (*_BASE_FILES, "META")):
+        return None
+    meta = dict(line.split("=", 1) for line in (cache / "META").read_text().splitlines() if "=" in line)
+    if meta.get("base_head_before") != base_head or meta.get("regress_hash") != regress_hash(reg):
+        return None
+    return meta
 
 
 class _Stop(Exception):
@@ -115,7 +136,7 @@ def _judge(reg, out) -> int:
     return r.returncode
 
 
-def run(base, after, out, root=None) -> int:
+def run(base, after, out, root=None, base_cache=None) -> int:
     out = Path(out).resolve()
     meta = {}
     code = EXIT_VOID
@@ -141,7 +162,23 @@ def run(base, after, out, root=None) -> int:
             # 지난 실행의 산출물을 «이번 결과»로 읽지 않는다
             (out / name).unlink(missing_ok=True)
         meta["side_cmd"] = " ".join(reg.side_cmd)
-        _run_side(reg, "base", base, out, meta, base_head, profile.root)
+        cache = Path(base_cache).resolve() if base_cache else None
+        cached = _cached_base(cache, base_head, reg)
+        if cached:
+            for name in _BASE_FILES:
+                shutil.copyfile(cache / name, out / name)
+            meta.update({k: v for k, v in cached.items() if k.startswith("base_")})
+            meta["base_cached"] = "1"
+        else:
+            _run_side(reg, "base", base, out, meta, base_head, profile.root)
+            if cache:
+                cache.mkdir(parents=True, exist_ok=True)
+                for name in _BASE_FILES:
+                    if (out / name).is_file():
+                        shutil.copyfile(out / name, cache / name)
+                base_meta = {k: v for k, v in meta.items() if k.startswith("base_")}
+                base_meta["regress_hash"] = regress_hash(reg)
+                (cache / "META").write_text("".join(f"{k}={v}\n" for k, v in base_meta.items()))
         _run_side(reg, "after", after, out, meta, after_head, profile.root)  # 곧바로 — 사이에 아무것도 기다리지 않는다
         code = _judge(reg, out)
     except _Stop as stop:

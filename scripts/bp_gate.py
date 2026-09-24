@@ -523,6 +523,26 @@ def _mutate(root, ws, led, copy_path, m):
     return _git(copy_path, "checkout", "-q", "--detach", ref).returncode == 0
 
 
+def _exec_hash(profile):
+    h = hashlib.sha256(repr(profile.exec_cmd).encode())
+    if profile.exec_cmd and Path(profile.exec_cmd[0]).is_file():
+        h.update(Path(profile.exec_cmd[0]).read_bytes())
+    return h.hexdigest()
+
+
+def _control_cached(profile, root, ws, led, rub, rundir):
+    key = f"{_head(root)}:{led['frozen'][RUBRIC]}:{_exec_hash(profile)}"
+    path = ws / "control_cache.json"
+    if path.is_file():
+        c = json.loads(path.read_text())
+        if c.get("key") == key:
+            return True, c["control"], {"cached": True, "axes": c["axes"]}
+    ran, control, info = _control(profile, root, ws, led, rub, rundir)
+    if ran:
+        path.write_text(json.dumps({"key": key, "control": control, "axes": info["axes"]}, ensure_ascii=False))
+    return ran, control, info
+
+
 def _control(profile, root, ws, led, rub, rundir):
     """축마다 사본 → 변이 → R-CAUSE → 폐기. 변이 후 R-CAUSE 가 빨개지고 alive 는 초록이어야 축 통과."""
     axes = []
@@ -549,7 +569,8 @@ def _control(profile, root, ws, led, rub, rundir):
 def _regress(profile, root, ws, led, rundir):
     try:
         with _copy(root, profile, led["baseline_sha"]) as base:
-            code = bp_regress.run(base, root, rundir / "regress", root=root)
+            code = bp_regress.run(base, root, rundir / "regress", root=root,
+                                  base_cache=ws / "baseline_cache" / led["baseline_sha"])
     except _CopyFailed as e:
         return False, None, {"why": str(e)}
     rec = {"exit": code, "out": str(rundir / "regress")}
@@ -601,7 +622,7 @@ def cmd_run(root, a):
     args = {"probe_ok": True, "control": None, "cause": None, "symptom": None, "regress": None}
     rows = {}
     steps = [
-        ("R-CONTROL", "control", lambda: _control(profile, root, ws, led, rub, rundir)),
+        ("R-CONTROL", "control", lambda: _control_cached(profile, root, ws, led, rub, rundir)),
         ("R-CAUSE", "cause", lambda: _run_row(profile, root, ws, rub["R-CAUSE"], root, rundir / "cause.out")),
         ("R-SYMPTOM", "symptom", lambda: _run_row(profile, root, ws, rub["R-SYMPTOM"], root, rundir / "symptom.out")),
         ("R-REGRESS", "regress", lambda: _regress(profile, root, ws, led, rundir)),
@@ -619,6 +640,21 @@ def cmd_run(root, a):
     if args["regress"] is False:
         print(f"  새 빨강: {rundir / 'regress' / 'new_red.txt'} — 원인과 무관해 보이면 SPEC 으로 GATE 1 재진입(사용자 판단)")
     return code
+
+
+def cmd_record_sweep(root, a):
+    ws = _ws(root, a.slug)
+    led = _load(ws)
+    if led["track"] != "formal" or led["frozen"] is None:
+        raise GateError("record-sweep 은 정식 트랙 · 동결 이후에")
+    ev = (ws / a.regression).resolve()
+    if ws.resolve() not in ev.parents or not ev.is_file():
+        raise GateError(f"근거 파일은 작업공간 안에 있어야 한다: {a.regression}")
+    if led["phase"] == "DEFERRED" or led["code_count"] >= CAP:
+        raise GateError(f"cap 도달 ({led['code_count']}/{CAP}) — DEFERRED", EXIT_CAP)
+    # P5b 는 cap 을 직접 세지 않는다 — 확정 회귀를 R-REGRESS 실패로 표현해 같은 진리표에 넣는다
+    args = {"probe_ok": True, "control": True, "cause": True, "symptom": True, "regress": False}
+    return _judge(ws, led, _head(root), args, {"R-REGRESS": {"sweep_evidence": str(ev)}}, "sweep")
 
 
 def cmd_status(root, a):
@@ -665,13 +701,16 @@ def _parser():
     s.add_argument("--red", nargs="+", required=True)
     s = sub.add_parser("run")
     s.add_argument("slug")
+    s = sub.add_parser("record-sweep")
+    s.add_argument("slug")
+    s.add_argument("--regression", required=True)
     return p
 
 
 COMMANDS = {"init": cmd_init, "status": cmd_status, "triage": cmd_triage,
             "promote": cmd_promote, "to-light": cmd_to_light,
             "freeze": cmd_freeze, "refreeze": cmd_refreeze, "baseline": cmd_baseline,
-            "run": cmd_run}
+            "run": cmd_run, "record-sweep": cmd_record_sweep}
 
 
 def main(argv) -> int:
