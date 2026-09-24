@@ -36,6 +36,18 @@ exit 1
 """
 
 
+# 가짜 화면 서버 — 트리를 정적으로 서빙하고, 듣기 시작한 «뒤» BP_URL 을 낸다
+SERVE_SH = """#!/bin/sh
+exec python3 -c 'import functools,http.server,socketserver,sys
+h=functools.partial(http.server.SimpleHTTPRequestHandler,directory=sys.argv[1])
+s=socketserver.TCPServer(("127.0.0.1",0),h)
+print("BP_URL=http://127.0.0.1:%d" % s.server_address[1], flush=True)
+s.serve_forever()' "$1"
+"""
+
+UI_OVERRIDES = {"ui.serve_cmd": ["bin/serve.sh"], "ui.ready_marker": "^BP_URL="}
+
+
 def write_profile(root, overrides=None) -> None:
     """overrides: {"schema": 2} · {"regress.not_fully": "x"} · 값이 None 이면 그 키를 뺀다."""
     data = json.loads(json.dumps(PROFILE_DEFAULTS))
@@ -63,6 +75,9 @@ def make_root(tmp, overrides=None) -> Path:
     side = root / "bin" / "side.sh"
     side.write_text(FAKE_SIDE)
     side.chmod(0o755)
+    serve = root / "bin" / "serve.sh"
+    serve.write_text(SERVE_SH)
+    serve.chmod(0o755)
     write_profile(root, overrides)
     return root
 
