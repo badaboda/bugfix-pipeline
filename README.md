@@ -85,6 +85,10 @@ hooks/install.sh uninstall   # 제거 (작업 가지 한정이므로 끝나면 �
 ## 설치
 
 ```sh
+# GitHub 에서
+claude plugin marketplace add badaboda/bugfix-pipeline
+claude plugin install bugfix-pipeline@bugfix-pipeline-marketplace
+
 # 개발 중 — 설치 없이 한 세션만
 claude --plugin-dir /path/to/bugfix-pipeline
 
@@ -93,7 +97,7 @@ claude plugin marketplace add /path/to/bugfix-pipeline
 claude plugin install bugfix-pipeline@bugfix-pipeline-marketplace
 ```
 
-두 경로 모두 2026-09-24(Claude Code 2.1.281)에 세션 `init` 의 에이전트 목록으로 적재를 확인했다. 🔴 `skills/bugfix-pipeline/SKILL.md` 가 아직 없으므로 설치해도 **파이프라인 자체는 호출할 수 없다** — 지금 적재되는 것은 조사자 에이전트 하나다.
+세 경로 모두 2026-09-24(Claude Code 2.1.281)에 세션 `init` 의 에이전트 목록으로 적재를 확인했다. 🔴 `skills/bugfix-pipeline/SKILL.md` 가 아직 없으므로 설치해도 **파이프라인 자체는 호출할 수 없다** — 지금 적재되는 것은 조사자 에이전트 하나다.
 
 ## 플러그인 레이아웃 근거
 

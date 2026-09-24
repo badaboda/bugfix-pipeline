@@ -52,10 +52,11 @@ tests/                           pytest — «개발용». 설치처 검증은 -
 
 ## 알려진 미확인
 
-- (해소 · 2026-09-24, Claude Code 2.1.281) 로컬 시험 경로 두 가지가 **둘 다 된다** — 판정은 모델 답이 아니라 `--output-format stream-json --verbose` 의 `init` 메시지 `agents` 배열로 했다.
+- (해소 · 2026-09-24, Claude Code 2.1.281) 설치 경로 세 가지가 **모두 된다** — 판정은 모델 답이 아니라 `--output-format stream-json --verbose` 의 `init` 메시지 `agents` 배열로 했다.
   - `claude --plugin-dir <레포>` — 설치 없이 그 세션만. `init.plugins[].source` 가 `bugfix-pipeline@inline`. 대조: 플래그 없는 세션엔 `bugfix-pipeline:*` 에이전트 0.
   - `claude plugin marketplace add <레포 절대경로>` → `install bugfix-pipeline@bugfix-pipeline-marketplace`. 설치본 `path` 가 캐시 사본이 아니라 **레포 디렉토리 자체**였다(편집이 즉시 반영되는지는 안 쟀다).
   - `claude plugin validate <레포>` 가 매니페스트를 검사한다(깨진 `plugin.json` 에 exit 1 확인). 현재 경고 1: `author` 없음.
+  - GitHub: `claude plugin marketplace add badaboda/bugfix-pipeline` → 같은 `install`. 설치본 `path` 는 **캐시 사본**(`~/.claude/plugins/cache/bugfix-pipeline-marketplace/bugfix-pipeline/<version>`) — 푸시만으로는 안 바뀌고 `plugin update` 가 필요하다(갱신 동작은 안 쟀다).
   - 🔴 로컬 마켓플레이스와 GitHub 마켓플레이스는 **이름이 같다**(`bugfix-pipeline-marketplace`) — 시험 후 `marketplace remove` 로 치운다.
 - `hooks/` 에 git 훅이 있어도 적재 오류·경고는 없었다(위 `init` 기준). 이벤트 훅 자리(`hooks/hooks.json`)와 겹치는지는 그 파일이 생길 때 다시 본다.
 
