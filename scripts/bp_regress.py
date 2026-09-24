@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -135,9 +136,112 @@ def run(base, after, out, root=None) -> int:
     return code
 
 
+def _case_equal(tmp):
+    root, base = bp_fixture.make_host(tmp, ["t::a"], ["t::a"])
+    return root, base, root
+
+
+def _case_new_red(tmp):
+    root, base = bp_fixture.make_host(tmp, ["t::a"], ["t::a", "t::b"])
+    return root, base, root
+
+
+def _case_fixed_only(tmp):
+    root, base = bp_fixture.make_host(tmp, ["t::a", "t::b"], ["t::a"])
+    return root, base, root
+
+
+def _case_reversed(tmp):
+    root, base = bp_fixture.make_host(tmp, [], [])
+    return root, root, base
+
+
+def _case_marker_missing(tmp):
+    root, base = bp_fixture.make_host(tmp, [], [])
+    (base / "tests" / "marker").unlink()
+    return root, base, root
+
+
+def _case_partial(tmp):
+    root, base = bp_fixture.make_host(tmp, [], [])
+    bp_fixture.set_mode(root, "partial")
+    return root, base, root
+
+
+def _case_no_names(tmp):
+    root, base = bp_fixture.make_host(tmp, [], [])
+    bp_fixture.set_mode(root, "nonames")
+    return root, base, root
+
+
+def _case_moved(tmp):
+    root, base = bp_fixture.make_host(tmp, [], [])
+    bp_fixture.set_mode(base, "commit")
+    return root, base, root
+
+
+def _case_outside_roots(tmp):
+    root, base = bp_fixture.make_host(tmp, [], [], {"regress.allowed_roots": ["/nonexistent-bp-root"]})
+    return root, base, root
+
+
+def _case_bad_profile(tmp):
+    root, base = bp_fixture.make_host(tmp, [], [])
+    bp_fixture.write_profile(root, {"schema": 2})
+    return root, base, root
+
+
+# (이름, 준비(tmp) -> (호출 루트, 기준선, 수정 후), 기대 exit)
+SCENARIOS = [
+    ("같은 집합", _case_equal, 0),
+    ("새 빨강", _case_new_red, 1),
+    ("고쳐진 것만", _case_fixed_only, 0),
+    ("방향 역전", _case_reversed, 3),
+    ("기준선 표지 없음", _case_marker_missing, 3),
+    ("수정 후 전수 미실행", _case_partial, 3),
+    ("수정 후 이름 파일 없음", _case_no_names, 3),
+    ("기준선 측정 중 커밋", _case_moved, 3),
+    ("allowed_roots 밖", _case_outside_roots, 2),
+    ("잘못된 프로파일", _case_bad_profile, 2),
+]
+
+
+def _selftest() -> int:
+    global bp_fixture
+    import bp_fixture
+
+    failures = []
+    for name, prepare, want in SCENARIOS:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp).resolve()
+            root, base, after = prepare(tmp)
+            out = tmp / "out"
+            # CLI 로 부른다 — cwd 에서 호출 루트를 푸는 경로까지 잰다
+            r = subprocess.run(
+                [sys.executable, str(Path(__file__).resolve()), "run", str(base), str(after), str(out)],
+                cwd=str(root), capture_output=True, text=True,
+            )
+            if r.returncode != want:
+                failures.append(f"{name}: 기대 exit {want}, 실제 {r.returncode} — {r.stderr.strip()}")
+            if name == "같은 집합" and r.returncode == 0:
+                for side, tree in (("base", base), ("after", after)):
+                    first = (out / f"{side}.log").read_text().splitlines()[0]
+                    if first != f"argv: 2|{tree}|{out / f'{side}_names.txt'}":
+                        failures.append(f"argv 대칭 깨짐 ({side}): {first}")
+    if failures:
+        print("selftest FAIL:")
+        for f in failures:
+            print(f"  - {f}")
+        return 1
+    print(f"selftest OK — 시나리오 {len(SCENARIOS)}개 + argv 대칭")
+    return 0
+
+
 def main(argv) -> int:
     if argv[:1] == ["run"] and len(argv) == 4:
         return run(*argv[1:])
+    if argv == ["--selftest"]:
+        return _selftest()
     print("사용법: bp_regress.py run <기준선 트리> <수정 후 트리> <출력 디렉토리> | --selftest", file=sys.stderr)
     return EXIT_CONFIG
 
