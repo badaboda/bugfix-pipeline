@@ -161,6 +161,80 @@ def cmd_init(root, a):
     return EXIT_OK
 
 
+def _run_repro(profile, root, ws, tree):
+    argv = bp_profile.exec_argv(profile, tree, ["sh", str(ws / REPRO_SH), str(tree)])
+    r = subprocess.run(argv, cwd=str(root), capture_output=True, text=True)
+    return r.returncode, r.stdout + r.stderr
+
+
+def cmd_triage(root, a):
+    ws = _ws(root, a.slug)
+    led = _load(ws)
+    if led["track"] is not None:
+        raise GateError(f"이미 트리아지됐다 — track={led['track']}")
+    profile = _profile(root)
+    observed = _repro_fields(ws).get("observed", "")
+    has_sh = (ws / REPRO_SH).is_file()
+    if has_sh and not a.repro_confirmed:
+        raise GateError("repro.sh 는 사용자가 「이게 내가 본 것」을 확인한 뒤에 쓴다 — 확인 후 --repro-confirmed")
+    runs = []
+    if has_sh and observed:
+        for _ in range(TRIAGE_RUNS):
+            code, out = _run_repro(profile, root, ws, root)
+            runs.append({"exit": code, "observed": observed in out})
+    deterministic = (
+        bool(runs)
+        and all(r["observed"] and r["exit"] != ENV_FAILED for r in runs)
+        and len({r["exit"] for r in runs}) == 1
+    )
+    suite = profile.regress is not None
+    track = "formal" if deterministic and suite and not a.light else "light"
+    led.update(
+        track=track, phase="P1" if track == "formal" else "L1", base_sha=_head(root),
+        triage={"deterministic": deterministic, "suite": suite, "light_requested": a.light,
+                "runs": runs, "repro_confirmed": a.repro_confirmed,
+                "exec_default": profile.exec_cmd is None, "at": _now()},
+    )
+    _save(ws, led)
+    print(f"triage: {track} (결정적 재현={deterministic} · 스위트={suite} · 가볍게={a.light})")
+    if profile.exec_cmd is None:
+        print("  경고: exec 기본값 — 사본에 추적 안 되는 의존성이 필요하면 사본 측정이 빨개진다")
+    return EXIT_OK
+
+
+def _change_track(led, to, reason, kind):
+    led["track_changes"].append({"from": led["track"], "to": to, "kind": kind, "reason": reason,
+                                 "at": _now(), "code_count": led["code_count"]})
+    led["track"] = to
+
+
+def cmd_promote(root, a):
+    ws = _ws(root, a.slug)
+    led = _load(ws)
+    if led["track"] != "light":
+        raise GateError("가벼운 트랙이 아니다")
+    t = led["triage"]
+    if not (t["deterministic"] and t["suite"]):
+        raise GateError("정식 트랙의 전제(결정적 재현 · 스위트)가 없다 — 승급하지 않고 GATE L 에서 사용자에게 올린다")
+    _change_track(led, "formal", a.reason, "promote")
+    led["phase"] = "P1"
+    _save(ws, led)
+    print("promote: formal · P1")
+    return EXIT_OK
+
+
+def cmd_to_light(root, a):
+    ws = _ws(root, a.slug)
+    led = _load(ws)
+    if led["track"] != "formal":
+        raise GateError("정식 트랙이 아니다")
+    _change_track(led, "light", a.reason, a.kind)
+    led["phase"] = "L1"
+    _save(ws, led)
+    print(f"to-light: light · L1 ({a.kind})")
+    return EXIT_OK
+
+
 def cmd_status(root, a):
     ws = _ws(root, a.slug)
     led = _load(ws)
@@ -183,10 +257,22 @@ def _parser():
     s = sub.add_parser("status")
     s.add_argument("slug")
     s.add_argument("--close", choices=sorted(_CLOSED))
+    s = sub.add_parser("triage")
+    s.add_argument("slug")
+    s.add_argument("--light", action="store_true")
+    s.add_argument("--repro-confirmed", action="store_true")
+    s = sub.add_parser("promote")
+    s.add_argument("slug")
+    s.add_argument("--reason", required=True)
+    s = sub.add_parser("to-light")
+    s.add_argument("slug")
+    s.add_argument("--kind", required=True, choices=["cannot-measure", "unstable", "size"])
+    s.add_argument("--reason", required=True)
     return p
 
 
-COMMANDS = {"init": cmd_init, "status": cmd_status}
+COMMANDS = {"init": cmd_init, "status": cmd_status, "triage": cmd_triage,
+            "promote": cmd_promote, "to-light": cmd_to_light}
 
 
 def main(argv) -> int:
