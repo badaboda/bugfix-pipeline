@@ -144,3 +144,35 @@ def test_vitest_unhandled_error_after_the_fix_is_not_green(tmp_path):
     _git(root, "commit", "-q", "-am", "after")
     code = bp_regress.run(copy, root, tmp_path / "out", root=root)
     assert code != 0, (tmp_path / "out" / "after.log").read_text()[-800:]
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="uv 없음")
+def test_pytest_template_handles_color_addopts_and_ignored_generated_src(tmp_path):
+    # 종단 실측(공개 OSS, hatch-vcs): addopts --color=yes 가 요약 줄 앞에 ANSI 를 붙여 ran_fully 가 안 걸렸고,
+    # git 이 무시하는 src/<pkg>/_version.py 가 사본에 없어 import 가 실패했다 — 둘 다 측정 무효였다
+    root = tmp_path / "py"
+    (root / "src" / "pkg").mkdir(parents=True)
+    (root / "tests").mkdir()
+    (root / "pyproject.toml").write_text(
+        '[project]\nname = "pkg"\nversion = "0"\n'
+        '[build-system]\nrequires = ["hatchling"]\nbuild-backend = "hatchling.build"\n'
+        '[tool.pytest.ini_options]\naddopts = "--color=yes"\n'
+    )
+    (root / "src" / "pkg" / "__init__.py").write_text('from ._version import V\nVALUE = "base"\n')
+    (root / "src" / "pkg" / "_version.py").write_text('V = "0"\n')
+    (root / "tests" / "test_v.py").write_text('import pkg\n\ndef test_value():\n    assert pkg.VALUE == "base"\n')
+    (root / ".gitignore").write_text(".venv/\nsrc/*/_version.py\n")
+    _install_template(root, "pytest", extra="pyproject.toml")
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "base")
+    copy = tmp_path / "copy"
+    _git(root, "worktree", "add", "-q", "--detach", str(copy), "HEAD")
+    (root / "src" / "pkg" / "__init__.py").write_text('from ._version import V\nVALUE = "after"\n')
+    _git(root, "commit", "-q", "-am", "after")
+    subprocess.run(["uv", "venv", "-q"], cwd=root, check=True)
+    subprocess.run(["uv", "pip", "install", "-q", "--python", ".venv/bin/python", "-e", ".", "pytest"],
+                   cwd=root, check=True)
+    code = bp_regress.run(copy, root, tmp_path / "out", root=root)
+    assert code == 1, (tmp_path / "out" / "base.log").read_text()[-800:]
+    assert (tmp_path / "out" / "new_red.txt").read_text().split() == ["tests/test_v.py::test_value"]

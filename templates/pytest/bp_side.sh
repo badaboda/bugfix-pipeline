@@ -4,7 +4,7 @@
 tree=$1; names=$2
 here=$(cd "$(dirname "$0")" && pwd)
 raw="$names.raw"
-"$here/bp_exec.sh" "$tree" -- ${BP_PYTEST:-python3 -m pytest} -rfE -p no:cacheprovider > "$raw" 2>&1
+"$here/bp_exec.sh" "$tree" -- ${BP_PYTEST:-python3 -m pytest} -rfE -p no:cacheprovider --color=no > "$raw" 2>&1
 status=$?
 cat "$raw"
 # FAILED 만 세면 fixture·setup 오류(ERROR)가 빠진다 — 그것도 «새 빨강»이다

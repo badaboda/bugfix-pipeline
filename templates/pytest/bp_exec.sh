@@ -17,6 +17,17 @@ if [ -d "$tree/.venv" ]; then
 elif [ -d "$root/.venv" ]; then
   PATH="$root/.venv/bin:$PATH"
   PYTHONPATH="$tree/src:$tree${PYTHONPATH:+:$PYTHONPATH}"; export PYTHONPATH
+  # 🔴 사본에는 git 이 «무시하는» 생성 파일도 없다(종단 실측: hatch-vcs 의 src/<pkg>/_version.py — import 가
+  #    exit 1 로 실패). 루트 src/ 아래 무시된 .py 중 사본에 없는 것만 채운다(캐시 제외).
+  if [ "$tree" != "$root" ] && [ -d "$root/src" ]; then
+    git -C "$root" ls-files --others --ignored --exclude-standard -- src 2>/dev/null \
+      | grep -E '\.py$' | grep -v '/__pycache__/' > "$tree/.bp_generated" || true
+    while IFS= read -r f; do
+      [ -e "$tree/$f" ] && continue
+      mkdir -p "$tree/$(dirname "$f")" && cp "$root/$f" "$tree/$f" || exit 125
+    done < "$tree/.bp_generated"
+    rm -f "$tree/.bp_generated"
+  fi
 else
   echo "bp_exec: .venv 가 없다 — 트리에도 호출 루트에도 ($tree · $root)" >&2
   exit 125

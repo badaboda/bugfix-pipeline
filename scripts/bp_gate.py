@@ -664,9 +664,18 @@ def _control_cached(profile, root, ws, led, rub, rundir):
 def _control(profile, root, ws, led, rub, rundir):
     """축마다 사본 → 변이 → R-CAUSE → 폐기. 변이 후 R-CAUSE 가 빨개지고 alive 는 초록이어야 축 통과."""
     axes = []
+    # 사본이 «망가져서» 빨개지면(무시된 생성 파일 부재 등) 축이 공허하게 통과한다 — 변이 전 사본이 원본과 같게 재야 한다
+    r_ran, r_pass, _ = _run_row(profile, root, ws, rub["R-CAUSE"], root, rundir / "control_root.out")
+    if not r_ran:
+        return False, None, {"axes": axes, "why": "원본에서 R-CAUSE 가 돌지 못했다"}
     for i, ax in enumerate(rub["R-CONTROL"]["axes"]):
         try:
             with _copy(root, profile, "HEAD") as cp:
+                c_ran, c_pass, _ = _run_row(profile, root, ws, rub["R-CAUSE"], cp, rundir / f"control_{i}_copy.out")
+                if not c_ran or c_pass != r_pass:
+                    return False, None, {"axes": axes, "failed": ax["name"],
+                                         "why": f"변이 전 사본이 원본과 다르게 잰다(원본 {r_pass} · 사본 {c_pass}) — "
+                                                "사본에 없는 무시된 파일(생성 파일 · .env 등)을 exec 래퍼가 채워야 한다"}
                 if not _mutate(root, ws, led, cp, ax["mutate"]):
                     return False, None, {"axes": axes, "failed": ax["name"], "why": "변이를 적용하지 못했다"}
                 ran, passed, rec = _run_row(profile, root, ws, rub["R-CAUSE"], cp, rundir / f"control_{i}.out")

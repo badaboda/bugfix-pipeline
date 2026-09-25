@@ -110,3 +110,17 @@ def test_refund_last_code_needs_a_code(tmp_path):
     assert gate(root, "refreeze", "b1", "--reason", "측정 결함", "--refund-last") == 0
     led = ledger(root, "b1")
     assert led["code_count"] == 0 and led["history"][0]["refunded"]
+
+
+def test_copy_that_measures_differently_from_the_root_is_env(tmp_path):
+    # 사본에는 git 이 무시하는 생성 파일이 없다(실측: hatch-vcs _version.py — import 가 exit 1).
+    # 사본이 «망가져서» 빨개지면 R-CONTROL 축이 공허하게 통과한다 — 변이 전 사본을 원본과 대조해 ENV 로
+    root, ws, red = _at_p3(tmp_path)
+    (root / ".gitignore").write_text((root / ".gitignore").read_text() + "gen\n")
+    (root / "gen").write_text("x\n")
+    (root / "check.sh").write_text('[ -e gen ] && [ "$(cat value.txt)" = good ] && [ ! -e broken ]\n')
+    git(root, "commit", "-q", "-am", "chore: 생성 파일에 기대는 불변식")
+    fix_commit(root, red)
+    assert gate(root, "run", "b1") == 1
+    h = _last(root)
+    assert h["attribution"] == "ENV"
