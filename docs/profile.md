@@ -99,6 +99,8 @@ v1 템플릿에는 `serve_cmd` 가 없다.
   - npm/yarn/pnpm 워크스페이스: 루트 `node_modules` 의 워크스페이스 링크가 루트 패키지를 가리킨다 → 템플릿이
     **거부(125)** 한다. 워크스페이스 레포는 사본에 직접 설치하는 `exec` 를 쓴다.
 - 템플릿 래퍼는 명령을 찾지 못하면 125 다(`command -v`). pytest 템플릿은 `.venv` 가 어디에도 없어도 125.
+- 🔴 **사본에는 git 이 «무시하는» 생성 파일도 없다**(종단 실측: hatch-vcs `src/<pkg>/_version.py` — import 가 exit 1). pytest 템플릿은 루트 `src/` 아래 무시된 `.py` 중 사본에 없는 것을 채운다. 다른 자리의 생성 파일은 래퍼가 채워야 한다 — 못 채우면 게이트가 «변이 전 사본이 원본과 다르게 잰다»로 ENV 를 낸다.
+- pytest 템플릿의 `bp_side.sh` 는 `--color=no` 를 붙인다 — 호스트 `addopts` 의 `--color=yes` 가 요약 줄 앞에 ANSI 를 붙여 `ran_fully` 가 안 걸렸다(종단 실측).
 - 기본값 `bp_exec_local` 은 사본 의존성을 해결하지 않는다. 그런 프로젝트는 `exec` 를 둔다.
 
 ## `regress.side_cmd` 계약

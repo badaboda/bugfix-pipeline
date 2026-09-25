@@ -15,7 +15,7 @@ RED 가 가리키는 불변식을 성립시키는 **최소** 수정을 한다. �
 | `workspace` | 작업공간 절대경로 — `root_cause.json`(`fix_scope`) · `rubric.json` · 지난 판정 `verdict_<n>.json` |
 | `tree` | 호출 루트 — 작업 가지 |
 | `cause_id` | 동결된 원인 id. 다르면 멈추고 묻는다 |
-| RED sha | RED 커밋 sha — 커밋 본문에 쓴다 |
+| RED sha · RED 명령 | RED 커밋 sha(커밋 본문에 쓴다) · RED 작성자가 보고한 RED 실행 명령 |
 
 루프 2 이상이면 리더가 직전 판정(`verdict_<n>.json`)과 귀속(`CODE` 이유)을 준다.
 

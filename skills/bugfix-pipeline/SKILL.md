@@ -34,8 +34,8 @@ description: "버그 수정 요청 하나를 원인 규명 → 수정 → 결정
 |---|---|---|---|
 | P1 조사 | `bugfix-pipeline:bug-root-cause-investigator` | `root_cause.json` · `rubric.json` 초안 · `control/*.diff` · `investigation.md` | GATE 1 |
 | GATE 1 | 🛑 사용자 | 진단 · `fix_scope` · `expected_after` 채우기 · 루브릭 확정. 리더는 사용자가 채운 `expected_after` 문구를 `rubric.json` 의 `R-SYMPTOM.assert` 자리에 옮긴다(조사자는 자리표시만 남긴다 — 그대로 동결하면 매번 FAIL) | `bp_gate.py freeze <slug>` |
-| P2 RED | `bugfix-pipeline:bug-red-writer` | 실패 테스트 커밋 · sha 보고 | `bp_gate.py baseline <slug> --red <파일…>` |
-| P3 GREEN | `bugfix-pipeline:bug-green-engineer` | `fix_scope` 안 최소 수정 · 커밋 본문 `RED: <sha>` | P4 |
+| P2 RED | `bugfix-pipeline:bug-red-writer` | 실패 테스트 커밋 · sha · RED 파일 · RED 실행 명령 보고 | `bp_gate.py baseline <slug> --red <파일…>` |
+| P3 GREEN | `bugfix-pipeline:bug-green-engineer` (배정에 RED sha · RED 실행 명령) | `fix_scope` 안 최소 수정 · 커밋 본문 `RED: <sha>` | P4 |
 | P4 자기확인 | 같은 구현자 | RED 통과 — 보고일 뿐. 회귀는 `run` 의 `R-REGRESS` 가 기준선 사본으로 잰다 | P5 |
 | P5 판정 | 게이트 | `bp_gate.py run <slug>` | 아래 표 |
 | P5b 스윕 | §4 | 관련 범위 화면 | GATE 2 |
@@ -89,7 +89,8 @@ description: "버그 수정 요청 하나를 원인 규명 → 수정 → 결정
 
 - 정식: `bp_gate.py status <slug> --pr-body` 가 `pr_body.md` 를 쓴다. 가벼운: `light-report` 가 이미 썼다.
 - **PR 본문은 `pr_body.md` 만 쓴다.** 명령 출력 원문(토큰 · `.env` 값 · 내부 URL 이 섞일 수 있다)을 붙이지 않는다.
-- `gh`(GitHub) 또는 `glab`(GitLab) 이 있고 원격이 그 포지를 가리키면: 경로 지정 커밋 → push → PR/MR. 🛑 push 와 PR 은 사용자 승인 후.
+- `gh`(GitHub) 또는 `glab`(GitLab) 이 있고 원격이 그 포지를 가리키면: 경로 지정 커밋 → push → PR/MR. 🛑 push 와 PR 은 사용자 승인 후 — 원격이 사용자의 것이 아니면(남의 OSS) 포크로 보낼지도 사용자가 정한다.
+- `pr_body.md` 는 한국어로 나온다 — 다른 언어가 필요한 곳이면 사용자 승인 전에 옮기고, 옮긴 것을 보인다(판정·표지·종료코드의 사실은 바꾸지 않는다).
 - 없으면 가지를 push 하고(원격이 있으면) `pr_body.md` 경로를 알린 뒤 **멈춘다** — 포지를 추측하지 않는다.
 - 끝나면 `bp_gate.py status <slug> --close done` (버리면 `--close abandoned`). 훅을 설치했으면 `$PLUGIN/hooks/install.sh uninstall`.
 
