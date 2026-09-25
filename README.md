@@ -81,9 +81,9 @@ hooks/install.sh uninstall   # 제거 (작업 가지 한정이므로 끝나면 �
 | `scripts/bp_ui.py` | ✅ 화면 서버 — `ui.serve_cmd` 로 주어진 트리를 띄워 URL · 프로세스 그룹 종료. 게이트의 `{url}` 행과 화면 재현(`needs_ui`)이 쓴다. 설치처 `--selftest` |
 | `scripts/bp_gate.py` | ✅ 게이트 — 명령 12종(트리아지 · 동결 · 커밋 감사 · 판정 · cap · 캐시 · 가벼운 트랙 검증·표지 · PR 본문) — [`docs/gate.md`](docs/gate.md). 설치처 `--selftest` |
 | `scripts/watch.sh` | ✅ 원천 그대로 · 인자 오류·DONE 경로만 여기서 확인 (STALL·ALIVE 는 원천 실발화 근거) |
-| `agents/bug-root-cause-investigator.md` | ⚠️ 이식했으나 **아직 탈-프로젝트화 안 됨** |
-| `skills/bugfix-pipeline/SKILL.md` | ❌ **미이식** — 원본이 특정 리포에 결합돼 있어 프로파일 기반으로 재작성 필요 |
-| 범용 에이전트 6개 (RED · GREEN×2 · 게이트 · 스위퍼 · 스윕게이트) | ❌ **미작성** |
+| `skills/bugfix-pipeline/SKILL.md` | ✅ 트리아지 · 정식/가벼운 트랙 · P5b · P6 를 `bp_gate.py` 명령과 멈춤 조건으로. 적재 확인(2026-09-25, Claude Code 2.1.282, `--plugin-dir`): `init` 에 스킬 `bugfix-pipeline:bugfix-pipeline` + 에이전트 6. ❌ 실제 버그 종단 실행 전(계획 C) |
+| `agents/` 6종 | ✅ 조사자(탈-프로젝트화 · `rubric.json`) · RED 작성자 · GREEN 구현자 · CTA 스위퍼 · 스윕 게이트 · 가벼운 수정자 — 배정 계약 한 모양(`workspace` · `tree` · `cause_id`) |
+| `tests/test_contracts.py` | ✅ 계약 린트 — 문서의 명령 · 파일명 · 표지 · 에이전트 이름 · 두 언어 트리거 · 원천 결합어를 `bp_gate` 상수와 대조. 사보타주 5축 대조 |
 | 프로파일 | ✅ v2 (사람이 쓰고 검사기가 잰다 · 없으면 가벼운 트랙만) · `init` 은 신호 하나일 때 «검사를 통과하지 못하는» 초안만 — 추정하지 않는다 |
 
 ## 남은 설계 결정
@@ -105,7 +105,7 @@ claude plugin marketplace add /path/to/bugfix-pipeline
 claude plugin install bugfix-pipeline@bugfix-pipeline-marketplace
 ```
 
-세 경로 모두 2026-09-24(Claude Code 2.1.281)에 세션 `init` 의 에이전트 목록으로 적재를 확인했다. 🔴 `skills/bugfix-pipeline/SKILL.md` 가 아직 없으므로 설치해도 **파이프라인 자체는 호출할 수 없다** — 지금 적재되는 것은 조사자 에이전트 하나다.
+세 경로 모두 2026-09-24(Claude Code 2.1.281)에 세션 `init` 의 에이전트 목록으로 적재를 확인했다(당시 에이전트 하나). 스킬과 에이전트 6종의 적재는 아래 「현재 상태」의 확인 기록을 본다.
 
 ## 플러그인 레이아웃 근거
 

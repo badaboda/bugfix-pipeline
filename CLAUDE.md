@@ -46,7 +46,7 @@ skills/bugfix-pipeline/SKILL.md
 hooks/                           commit-msg · install.sh (git 훅 — Claude Code 이벤트 훅과 다르다)
 scripts/                         bugfix_verdict.py · regress.sh · watch.sh · bp_profile.py · bp_regress.py · bp_gate.py · bp_ui.py (각 --selftest) · bp_exec_local.py · bp_fixture.py (테스트 전용)
 templates/<스택>/                bp_exec.sh · bp_side.sh · profile.json (실측한 것만 — pytest · vitest)
-tests/                           pytest — «개발용». 설치처 검증은 --selftest 다
+tests/                           pytest — «개발용». 설치처 검증은 --selftest 다. test_contracts.py = 문서↔코드 계약 린트
 ```
 
 에이전트는 `plugin:agent` 로 네임스페이스되므로 **호스트 프로젝트의 동명 에이전트와 충돌하지 않는다.**
