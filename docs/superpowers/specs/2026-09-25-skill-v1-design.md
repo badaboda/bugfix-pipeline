@@ -231,6 +231,9 @@ P6 PR      경로 지정 커밋 · push · PR (포지 CLI 가 없으면 가지 +
 | `light-verify <slug>` | 가벼운 | §3.3 — 재현 축 · 회귀 축을 **직접 실행**해 `light_verifications[]` 에 기록 | 2 |
 | `light-report <slug>` | 가벼운 | `light_verifications[]` 만으로 표지 계산 → `light_report.md` + PR 본문 초안. 검증 이후 커밋이 있으면 exit 2 | 2 |
 | `status <slug>` | 공통 | 트랙 · 단계 · 루프 N/3 · 원인 교체 이력 · 카드 밖 파일(`기준선..HEAD` 변경 − `fix_scope`) · 판정 이력 · 표지 | — |
+| `serve <slug> --side baseline\|after` | 정식 P5b | §9-1 의 두 URL — 기준선 사본(레포 밖) 또는 현재 트리를 `ui.serve_cmd` 로 띄우고 신호까지 머문다(계획 B 리뷰로 추가) | 2 |
+
+계획 B 리뷰로 정한 막다른 길 처리: `ANCHOR`·원인 교체 뒤 단계 P2 에서는 `baseline` 을 다시 불러 RED blob 을 재기록한다(기준선 sha 불변). `promote` 는 가벼운 수정을 `git revert` 로 되돌린 트리에서만 받고 `base_sha` 를 그 HEAD 로 옮긴다. 트리아지는 `repro.sh` 만 잰다 — 명령인 `steps` 도 `repro.sh` 로 감싼다.
 
 ### 6.1 `run`
 
@@ -384,8 +387,9 @@ P6 PR      경로 지정 커밋 · push · PR (포지 CLI 가 없으면 가지 +
 - Windows 네이티브 · 네이티브 UI 스윕
 - 버그별 표적 보강(결함의 기존 테스트가 `side_cmd` 수집 루트 밖에 있을 때) — 루브릭의 몫
 - 전수 CTA 스윕 — 별도 「메뉴 점검」 모드 후보
+- 계획 B 리뷰에서 미룬 Minor 2건 — 파일명 린트가 레포 어디든 있는 이름을 받는다(느슨함) · 원천 결합어 목록이 짧다(`INDEX.md` · `localhost:` 포트 등)
 - `bp_regress` 리뷰에서 미룬 Minor 6건
-- A3(`bp_ui`) 리뷰에서 미룬 Minor 7건 — `needs_ui: yes` 인데 `R-SYMPTOM` 에 `{url}` 이 없어도 동결 · 서버 로그 이름이
+- A3(`bp_ui`) 리뷰에서 미룬 Minor 6건(serve CLI 는 계획 B 의 `bp_gate.py serve` 로 해소) — `needs_ui: yes` 인데 `R-SYMPTOM` 에 `{url}` 이 없어도 동결 · 서버 로그 이름이
   초 단위로 겹침 · 게이트가 SIGTERM/SIGHUP 을 받으면 서버가 남음 · join 시간 초과 뒤 로그를 닫음 · 준비 전 출력 줄마다
-  `grep` 하나 · §3.1·§9 의 `bp_ui.py serve` CLI 없음(`check` 와 파이썬 `serve()` 만) · `needs_ui` 가 `yes/true/1/예` 밖이면
+  `grep` 하나 · `needs_ui` 가 `yes/true/1/예` 밖이면
   경고 없이 비화면으로

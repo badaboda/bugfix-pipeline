@@ -2,7 +2,7 @@
 
   python3 scripts/bp_gate.py <명령> <slug> [옵션]
   init · triage · freeze · baseline · run · refreeze · record-sweep ·
-  promote · to-light · light-verify · light-report · status   ·   --selftest
+  promote · to-light · light-verify · light-report · status · serve   ·   --selftest
 
 상태는 <호출 루트>/.bugfix-pipeline/<slug>/ledger.json 한 파일 — 재진입 정본.
 종료코드: 0 성공(run 은 PASS) · 1 run 판정이 PASS 아님 · 2 설정 오류·변조·감사 실패 · 4 cap 도달
@@ -15,11 +15,12 @@ import hashlib
 import json
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import time
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -294,23 +295,41 @@ def cmd_baseline(root, a):
     if led["frozen"] is None:
         raise GateError("동결 후에 기준선을 잡는다 — freeze 먼저")
     if led["baseline_sha"] is not None:
-        # 다시 잡게 두면 변조 흔적(RED 블롭)과 감사 범위를 지울 수 있다(A2 리뷰 실측)
-        raise GateError("기준선은 한 번만 잡는다 — 다시 시작하려면 새 slug 로")
+        if led["phase"] != "P2":
+            # 아무 때나 다시 잡게 두면 변조 흔적(RED 블롭)과 감사 범위를 지울 수 있다(A2 리뷰 실측)
+            raise GateError("기준선은 ANCHOR · 원인 교체(P2) 뒤에만 다시 잡는다 — RED 재작성 자리")
+        return _rebaseline(root, ws, led, a.red)
     base = led["base_sha"]
     log = _git(root, "log", "--format=%H", "--reverse", f"{base}..HEAD", "--", *a.red, check=True).stdout.split()
     if not log:
         raise GateError(f"{base[:7]}..HEAD 에 RED 파일을 건드린 커밋이 없다")
     red = log[0]
-    blobs = {}
-    for f in a.red:
-        r = _git(root, "rev-parse", f"HEAD:{f}")
-        if r.returncode:
-            raise GateError(f"RED 파일이 HEAD 에 없다: {f}")
-        blobs[f] = r.stdout.strip()
+    blobs = _red_blobs(root, a.red)
     led.update(baseline_sha=_git(root, "rev-parse", f"{red}^", check=True).stdout.strip(),
                red_commit=red, red_files=blobs, phase="P3")
     _save(ws, led)
     print(f"baseline OK — 기준선 {led['baseline_sha'][:7]} · RED {red[:7]}")
+    return EXIT_OK
+
+
+def _red_blobs(root, files):
+    blobs = {}
+    for f in files:
+        r = _git(root, "rev-parse", f"HEAD:{f}")
+        if r.returncode:
+            raise GateError(f"RED 파일이 HEAD 에 없다: {f}")
+        blobs[f] = r.stdout.strip()
+    return blobs
+
+
+def _rebaseline(root, ws, led, files):
+    """P2 재진입(ANCHOR · 원인 교체) — 기준선 sha 는 그대로, 다시 쓴 RED 의 블롭만 새로 기록한다."""
+    blobs = _red_blobs(root, files)
+    led["history"].append({"kind": "rebaseline", "at": _now(), "head": _head(root),
+                           "from": led["red_files"], "to": blobs})
+    led.update(red_files=blobs, phase="P3")
+    _save(ws, led)
+    print(f"baseline OK (재기록) — 기준선 {led['baseline_sha'][:7]} 그대로 · RED 파일 {len(blobs)}개")
     return EXIT_OK
 
 
@@ -381,6 +400,8 @@ def cmd_refreeze(root, a):
              "from_cause": led["cause_id"], "to_cause": cause_id}
     if cause_id != led["cause_id"]:
         led["cause_changes"].append(entry)
+        if led["baseline_sha"] is not None and led["phase"] != "DEFERRED":
+            led["phase"] = "P2"  # 새 원인의 불변식 — RED 를 다시 쓰고 baseline 으로 재기록
     entry["changed"] = sorted(k for k in set(frozen) | set(led["frozen"]) if frozen.get(k) != led["frozen"].get(k))
     if a.refund_last:
         if not entry["changed"]:
@@ -485,8 +506,12 @@ def cmd_promote(root, a):
     t = led["triage"]
     if not (t["deterministic"] and t["suite"]):
         raise GateError("정식 트랙의 전제(결정적 재현 · 스위트)가 없다 — 승급하지 않고 GATE L 에서 사용자에게 올린다")
+    _require_clean(root)
+    if _git(root, "diff", "--quiet", led["base_sha"], "HEAD").returncode:
+        # 가벼운 수정이 남아 있으면 RED 가 수정된 트리에서 쓰이고, 감사가 「RED 보다 먼저 들어간 수정」으로 거부한다
+        raise GateError("가벼운 트랙의 수정이 남아 있다 — git revert 로 트리아지 때 트리로 되돌린 뒤 승급한다")
     _change_track(led, "formal", a.reason, "promote")
-    led["phase"] = "P1"
+    led.update(phase="P1", base_sha=_head(root))  # 되돌린 가벼운 커밋은 감사 범위 밖
     _save(ws, led)
     print("promote: formal · P1")
     return EXIT_OK
@@ -875,6 +900,44 @@ def cmd_light_report(root, a):
     return EXIT_OK
 
 
+class _Stop(Exception):
+    pass
+
+
+def _raise_stop(*_):
+    raise _Stop()
+
+
+def cmd_serve(root, a):
+    """P5b — 기준선 사본(레포 밖) 또는 현재 트리를 ui.serve_cmd 로 띄워 BP_URL 을 내고, SIGTERM·SIGINT 까지 머문다."""
+    ws = _ws(root, a.slug)
+    led = _load(ws)
+    profile = _profile(root)
+    if profile.ui is None:
+        raise GateError("프로파일에 ui 가 없다 — P5b 생략(사유: ui 없음)")
+    rev = led["baseline_sha"] or led["base_sha"]
+    if a.side == "baseline" and rev is None:
+        raise GateError("기준선이 아직 없다")
+    (ws / "serve").mkdir(exist_ok=True)
+    prev = {s: signal.signal(s, _raise_stop) for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)}
+    try:
+        with ExitStack() as stack:
+            tree = stack.enter_context(_copy(root, profile, rev)) if a.side == "baseline" else root
+            url = stack.enter_context(bp_ui.serve(profile, tree, ws / "serve" / f"p5b-{a.side}.log"))
+            print(f"BP_URL={url}", flush=True)
+            while True:
+                time.sleep(1)
+    except _Stop:
+        return EXIT_OK
+    except _CopyFailed as e:
+        raise GateError(str(e))
+    except bp_ui.UiError as e:
+        raise GateError(f"화면 서버: {e}")
+    finally:
+        for s, h in prev.items():
+            signal.signal(s, h)
+
+
 def _formal_pr_body(root, ws, led):
     rc = json.loads((ws / ROOT_CAUSE).read_text()) if (ws / ROOT_CAUSE).is_file() else {}
     judged = [h for h in led["history"] if h.get("kind") in ("run", "sweep")]
@@ -949,6 +1012,9 @@ def _parser():
     s = sub.add_parser("record-sweep")
     s.add_argument("slug")
     s.add_argument("--regression", required=True)
+    s = sub.add_parser("serve")
+    s.add_argument("slug")
+    s.add_argument("--side", required=True, choices=["baseline", "after"])
     return p
 
 
@@ -956,7 +1022,7 @@ COMMANDS = {"init": cmd_init, "status": cmd_status, "triage": cmd_triage,
             "promote": cmd_promote, "to-light": cmd_to_light,
             "freeze": cmd_freeze, "refreeze": cmd_refreeze, "baseline": cmd_baseline,
             "run": cmd_run, "record-sweep": cmd_record_sweep,
-            "light-verify": cmd_light_verify, "light-report": cmd_light_report}
+            "light-verify": cmd_light_verify, "light-report": cmd_light_report, "serve": cmd_serve}
 
 
 def _selftest() -> int:

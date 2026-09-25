@@ -16,15 +16,16 @@ python3 <플러그인>/scripts/bp_gate.py --selftest
 | `init <slug>` | 공통 P0 | `.bugfix-pipeline/` 가 git 무시 경로 · 진행 중인 다른 slug 없음 | 작업공간 · `ledger.json` · `repro.md` 양식 |
 | `triage <slug> [--light] [--repro-confirmed]` | 공통 P0 | 아직 트리아지 전. `repro.sh` 가 있으면 `--repro-confirmed` 필수 | 재현 3 회 · 스위트 유무 · `--light` → 트랙. 이때의 HEAD 가 `base_sha` |
 | `freeze <slug>` | 정식 GATE 1 | 정식 트랙 · 동결 전 | `rubric.json`·`root_cause.json`·`repro.md` 검사 → 동결 해시 |
-| `refreeze <slug> --reason R [--refund-last]` | 정식 GATE 1 재진입 | 동결 후 | 재동결 · `cause_id` 가 바뀌면 원인 교체 이력 · `--refund-last` 는 직전 `CODE` 환불(사용자 승인) — **동결 파일이 하나 이상 바뀌어야** 하고, `DEFERRED` 에서 cap 아래로 내려가면 단계를 P5 로 되돌린다 |
-| `baseline <slug> --red F…` | 정식 P2 | 정식 트랙 · 동결 후 · **아직 기준선 없음**(한 번만) | 첫 RED 커밋의 부모 = 기준선 sha · RED 파일 blob 해시 |
+| `refreeze <slug> --reason R [--refund-last]` | 정식 GATE 1 재진입 | 동결 후 | 재동결 · `cause_id` 가 바뀌면 원인 교체 이력 · `--refund-last` 는 직전 `CODE` 환불(사용자 승인) — **동결 파일이 하나 이상 바뀌어야** 하고, `DEFERRED` 에서 cap 아래로 내려가면 단계를 P5 로 되돌린다. 기준선 이후 `cause_id` 가 바뀌면 단계 P2(새 RED) |
+| `baseline <slug> --red F…` | 정식 P2 | 정식 트랙 · 동결 후 · 기준선 없음, **또는 단계 P2**(`ANCHOR` · 원인 교체 뒤) | 첫 RED 커밋의 부모 = 기준선 sha · RED 파일 blob 해시. P2 재진입이면 기준선 sha 는 그대로 두고 다시 쓴 RED 의 blob 만 재기록(이력 `rebaseline`) — 그 밖의 재호출은 2 |
 | `run <slug>` | 정식 P5 | 정식 · 동결 · 기준선 · cap 미도달 | 아래 |
 | `record-sweep <slug> --regression F` | 정식 P5b | 정식 · 동결 · 근거 파일이 작업공간 안 | 진리표에 `regress=False` → `CODE` +1 |
-| `promote <slug> --reason R` | 가벼운 → 정식 | 트리아지가 결정적 · 스위트 있음 · `DEFERRED` 아님 | 승급, 단계 P1 |
+| `promote <slug> --reason R` | 가벼운 → 정식 | 트리아지가 결정적 · 스위트 있음 · `DEFERRED` 아님 · 깨끗한 트리 · **가벼운 수정을 되돌려 트리가 트리아지 때와 같음**(`git revert`) | 승급, 단계 P1 · `base_sha` = 지금 HEAD(되돌린 커밋은 감사 밖) |
 | `to-light <slug> --kind K --reason R` | 정식 → 가벼운 | 정식 트랙 · `DEFERRED` 아님(cap 을 트랙 변경으로 빠져나가지 않는다) | `K` = `cannot-measure` · `unstable` · `size` |
 | `light-verify <slug>` | 가벼운 | 수정 커밋이 있음 · **작업 트리가 깨끗함** | 재현 축 · 회귀 축을 **직접 실행**해 기록 |
 | `light-report <slug>` | 가벼운 | 마지막 검증 이후 커밋 없음 | 표지 계산 → `light_report.md`(로컬) · `pr_body.md` |
 | `status <slug> [--close done\|abandoned] [--pr-body]` | 공통 | — | 요약 · 종료 기록 · 정식 PR 본문 |
+| `serve <slug> --side baseline\|after` | 정식 P5b | 프로파일 `ui` | 기준선 사본(레포 밖) 또는 현재 트리를 `ui.serve_cmd` 로 띄워 `BP_URL=<url>` 한 줄을 내고 SIGTERM·SIGINT·SIGHUP 까지 머문다 — 끝나면 서버 그룹과 사본을 치운다 |
 
 종료코드: `0` 성공(`run` 은 PASS) · `1` `run`/`record-sweep` 판정이 PASS 아님 · `2` 설정 오류·변조·감사 실패 ·
 `3` 예상 못 한 예외(판정이 아니다) · `4` cap 도달(`DEFERRED`).

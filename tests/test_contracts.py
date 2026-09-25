@@ -133,3 +133,47 @@ def test_light_fixer_leaves_verification_to_code():
     assert "light-verify" in text                      # 검증은 누가 하는지 명시
     assert not _GATE_CALL.search(text)                 # 그러나 스스로 게이트를 부르지 않는다 — 리더 몫
     assert "승급" in text and "가설 하나" in text
+
+
+def _subparsers():
+    p = bp_gate._parser()
+    action = next(a for a in p._actions if a.__class__.__name__ == "_SubParsersAction")
+    return action.choices
+
+
+_CALL_SPAN = re.compile(r"bp_gate\.py\s+([a-z][a-z-]*)([^`\n]*)")
+
+
+def test_doc_flags_and_choices_exist_in_the_parser():
+    subs = _subparsers()
+    seen = 0
+    for path in _all_docs():
+        for cmd, rest in _CALL_SPAN.findall(_text(path)):
+            opts = subs[cmd]._option_string_actions
+            for flag, value in re.findall(r"(--[a-z-]+)(?:[ =]([a-z|-]+))?", rest):
+                seen += 1
+                assert flag in opts, f"{path.name}: {cmd} 에 {flag} 가 없다"
+                choices = opts[flag].choices
+                if choices and value and "|" in value:
+                    assert set(value.split("|")) == set(choices), f"{path.name}: {cmd} {flag} 값 {value}"
+    assert seen >= 8   # 0 은 질문이다
+
+
+def test_skill_exit_code_table_matches_the_gate():
+    line = next(l for l in _text(SKILL).splitlines() if l.startswith("게이트 종료코드"))
+    for code, word in ((bp_gate.EXIT_OK, "성공"), (bp_gate.EXIT_JUDGED, "판정이 PASS 아님"), (bp_gate.EXIT_CONFIG, "설정 오류"),
+                       (bp_gate.EXIT_UNEXPECTED, "예상 못 한 예외"), (bp_gate.EXIT_CAP, "cap")):
+        assert re.search(rf"`{code}` {word}", line), f"종료코드 {code} {word}"
+
+
+def test_skill_calls_plugin_files_through_the_plugin_root():
+    # cwd 는 호스트 레포다 — 상대 경로면 호스트의 동명 파일을 부른다
+    for m in re.finditer(r"(\S*)\b(hooks|scripts)/[\w.-]+\.(?:sh|py)", _text(SKILL)):
+        assert m.group(1).endswith("$PLUGIN/"), f"SKILL.md: 플러그인 루트 없이 {m.group(0)}"
+
+
+@pytest.mark.parametrize("agent", AGENTS)
+def test_agents_do_not_run_the_gate(agent):
+    text = _text(REPO / "agents" / f"{agent}.md")
+    assert not re.search(r"(python3|\$BP)\S*\s*\S*bp_gate\.py", text), "에이전트가 게이트를 직접 부른다"
+    assert "게이트 명령 실행" in text.split("## 하지 않는 것", 1)[-1], "금지 목록에 게이트 명령 실행이 없다"

@@ -79,7 +79,7 @@ hooks/install.sh uninstall   # 제거 (작업 가지 한정이므로 끝나면 �
 | `scripts/bp_profile.py` · `scripts/bp_regress.py` · `scripts/bp_exec_local.py` | ✅ 프로파일 v2(schema 2 — 파일·섹션 모두 선택) · `init` 초안 · `exec` 기본값 + R-REGRESS 실행부 — [`docs/profile.md`](docs/profile.md). 설치처 `--selftest` 둘 · 양성 대조 |
 | `templates/` | ✅ pytest · vitest 래퍼 — 루트·`git worktree` 사본에서 실측. ❌ go(측정 환경 없음) |
 | `scripts/bp_ui.py` | ✅ 화면 서버 — `ui.serve_cmd` 로 주어진 트리를 띄워 URL · 프로세스 그룹 종료. 게이트의 `{url}` 행과 화면 재현(`needs_ui`)이 쓴다. 설치처 `--selftest` |
-| `scripts/bp_gate.py` | ✅ 게이트 — 명령 12종(트리아지 · 동결 · 커밋 감사 · 판정 · cap · 캐시 · 가벼운 트랙 검증·표지 · PR 본문) — [`docs/gate.md`](docs/gate.md). 설치처 `--selftest` |
+| `scripts/bp_gate.py` | ✅ 게이트 — 명령 13종(트리아지 · 동결 · 커밋 감사 · 판정 · cap · 캐시 · 가벼운 트랙 검증·표지 · PR 본문) — [`docs/gate.md`](docs/gate.md). 설치처 `--selftest` |
 | `scripts/watch.sh` | ✅ 원천 그대로 · 인자 오류·DONE 경로만 여기서 확인 (STALL·ALIVE 는 원천 실발화 근거) |
 | `skills/bugfix-pipeline/SKILL.md` | ✅ 트리아지 · 정식/가벼운 트랙 · P5b · P6 를 `bp_gate.py` 명령과 멈춤 조건으로. 적재 확인(2026-09-25, Claude Code 2.1.282, `--plugin-dir`): `init` 에 스킬 `bugfix-pipeline:bugfix-pipeline` + 에이전트 6. ❌ 실제 버그 종단 실행 전(계획 C) |
 | `agents/` 6종 | ✅ 조사자(탈-프로젝트화 · `rubric.json`) · RED 작성자 · GREEN 구현자 · CTA 스위퍼 · 스윕 게이트 · 가벼운 수정자 — 배정 계약 한 모양(`workspace` · `tree` · `cause_id`) |
