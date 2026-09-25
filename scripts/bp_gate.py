@@ -610,10 +610,21 @@ def _exec_hash(profile):
     return h.hexdigest()
 
 
+def _ui_hash(profile):
+    # {url} 행은 serve 래퍼가 무엇을 서빙하느냐에 달렸다 — 래퍼가 git 밖에서 바뀌어도 캐시를 무효로
+    if profile.ui is None:
+        return "no-ui"
+    h = hashlib.sha256(repr(profile.ui).encode())
+    wrapper = Path(profile.ui.serve_cmd[0])
+    if wrapper.is_file():
+        h.update(wrapper.read_bytes())
+    return h.hexdigest()
+
+
 def _control_cached(profile, root, ws, led, rub, rundir):
     # 키: 측정을 바꾸는 것 전부 — HEAD · 동결 집합 전체(patch · repro.sh 포함) · @baseline 이 가리킬 sha · exec
     frozen = hashlib.sha256(json.dumps(led["frozen"], sort_keys=True).encode()).hexdigest()
-    key = f"{_head(root)}:{frozen}:{led['baseline_sha']}:{_exec_hash(profile)}"
+    key = f"{_head(root)}:{frozen}:{led['baseline_sha']}:{_exec_hash(profile)}:{_ui_hash(profile)}"
     path = ws / "control_cache.json"
     if path.is_file():
         c = json.loads(path.read_text())
@@ -807,8 +818,11 @@ def _light_labels(led):
     unstable = any(c["to"] == "light" and c["kind"] in ("cannot-measure", "unstable") for c in led["track_changes"])
     labels = []
     if repro and repro["mode"] == "after-only":
-        # 기준선을 못 쟀다는 것만으로는 결정론 표지가 아니다 — 수정 후에도 재현되거나 재현이 죽었을 때만
-        if repro["after_observed"] or repro["after_exit"] != 0 or unstable:
+        # 기준선을 못 쟀다는 것만으로는 결정론 표지가 아니다 — 수정 후에도 재현되거나 재현이 죽었을 때,
+        # 또는 트리아지부터 흔들렸을 때(수정 후 한 번 안 보인 것은 간헐 버그에서 증거가 아니다)
+        runs = (led.get("triage") or {}).get("runs") or []
+        flaky = not runs or not all(r["observed"] for r in runs) or len({r["exit"] for r in runs}) > 1
+        if repro["after_observed"] or repro["after_exit"] != 0 or unstable or flaky:
             labels.append(LABEL_NO_DETERMINISM)
         labels.append(LABEL_NO_BASELINE_REPRO)
     elif not clean or unstable:

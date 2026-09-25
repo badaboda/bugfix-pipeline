@@ -39,21 +39,35 @@ def _matches(pattern, line) -> bool:
     return r.returncode == 0
 
 
+def _group_alive(pgid) -> bool:
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def _stop(proc):
-    if proc.poll() is not None:
-        return
+    """리더가 이미 끝났어도 그룹은 남을 수 있다(서버를 백그라운드로 둔 래퍼) — 그룹이 빌 때까지 내린다."""
     try:
         os.killpg(proc.pid, signal.SIGTERM)
     except ProcessLookupError:
+        proc.wait()
         return
-    try:
-        proc.wait(timeout=STOP_GRACE_S)
-    except subprocess.TimeoutExpired:
+    deadline = time.monotonic() + STOP_GRACE_S
+    while time.monotonic() < deadline:
+        proc.poll()
+        if not _group_alive(proc.pid):
+            break
+        time.sleep(0.05)
+    else:
         try:
             os.killpg(proc.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
-        proc.wait()
+    proc.wait()
 
 
 def _wait_ready(lines, ui, proc):
@@ -63,8 +77,11 @@ def _wait_ready(lines, ui, proc):
         if left <= 0:
             raise UiError(f"준비 신호가 {ui.ready_timeout_s}초 안에 오지 않았다")
         try:
-            line = lines.get(timeout=left)
+            line = lines.get(timeout=min(left, 0.2))
         except queue.Empty:
+            # 자식이 stdout 을 쥐면 EOF 가 안 온다 — 리더의 비정상 종료로 가른다(exit 0 은 백그라운드로 둔 래퍼)
+            if proc.poll() not in (None, 0):
+                raise UiError(f"serve_cmd 가 준비 전에 끝났다 (exit {proc.returncode})")
             continue
         if line is None:
             raise UiError(f"serve_cmd 가 준비 전에 끝났다 (exit {proc.wait()})")

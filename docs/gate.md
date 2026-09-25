@@ -58,7 +58,7 @@ python3 <플러그인>/scripts/bp_gate.py --selftest
 
 | 캐시 | 키 | 무효 |
 |---|---|---|
-| `control_cache.json` | HEAD · 동결 집합 전체 해시(patch · `repro.sh` 포함) · 기준선 sha · `exec` 해시(래퍼 또는 `bp_exec_local.py` 내용) | 새 커밋 · 재동결 · 래퍼 변경 |
+| `control_cache.json` | HEAD · 동결 집합 전체 해시(patch · `repro.sh` 포함) · 기준선 sha · `exec` 해시(래퍼 또는 `bp_exec_local.py` 내용) · `ui` 해시(설정 + `serve_cmd` 래퍼 내용) | 새 커밋 · 재동결 · 래퍼 변경 |
 | `baseline_cache/<sha>/` | 기준선 sha · `regress` 해시(설정 + `side_cmd` 래퍼 내용) | 프로파일 `regress` 나 래퍼 변경. **기준선 쪽이 전수로 돈 실행만** 저장한다 |
 
 ## 작업공간 파일
@@ -98,7 +98,7 @@ python3 <플러그인>/scripts/bp_gate.py --selftest
 
 | 표지 | 붙는 조건 |
 |---|---|
-| `결정론 판정 없음` | 마지막 검증에 «수정 전 재현 · 수정 후 사라짐»이 결정적으로 없음(수정 후 재현의 exit 가 0 도, 수정 전 exit 도 아니면 «죽은» 것으로 본다) · 또는 `to-light --kind cannot-measure\|unstable` 이력 |
+| `결정론 판정 없음` | 마지막 검증에 «수정 전 재현 · 수정 후 사라짐»이 결정적으로 없음(수정 후 재현의 exit 가 0 도, 수정 전 exit 도 아니면 «죽은» 것으로 본다) · 또는 `to-light --kind cannot-measure\|unstable` 이력. **수정 후만 잰 경우**(`기준선 미재현`)는 수정 후에도 재현됨 · 수정 후 exit ≠ 0 · 트리아지 3 회가 모두 관측되지 않았거나 exit 가 달랐음 중 하나일 때 |
 | `회귀 미검증` | 마지막 검증에 회귀 축이 없음(`regress` 섹션 없음) 또는 측정 무효 |
 | `기준선 미재현` | 화면 재현(`needs_ui: yes`)인데 프로파일에 `ui` 가 없어 `url:`(사용자 서버)로 **현재 트리만** 쟀다 |
 

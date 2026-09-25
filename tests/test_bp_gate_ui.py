@@ -57,6 +57,7 @@ def test_url_row_serves_the_measured_tree(tmp_path):
 import subprocess  # noqa: E402
 
 import bp_gate  # noqa: E402
+import bp_fixture  # noqa: E402
 from bp_fixture import git, ledger, make_gate_host  # noqa: E402
 
 
@@ -115,8 +116,6 @@ def test_light_with_ui_measures_before_and_after(tmp_path):
 
 def test_light_without_ui_measures_after_only_and_labels(tmp_path):
     root = make_gate_host(tmp_path)
-    (root / "value.txt").write_text("good\n")
-    git(root, "commit", "-q", "-am", "chore: 미리")
     server = subprocess.Popen([sys.executable, "-u", "-c",
                                "import functools,http.server,socketserver,sys\n"
                                "h=functools.partial(http.server.SimpleHTTPRequestHandler,directory=sys.argv[1])\n"
@@ -130,7 +129,9 @@ def test_light_without_ui_measures_after_only_and_labels(tmp_path):
         ws = root / ".bugfix-pipeline" / "b1"
         _ui_repro(ws, url=f"http://127.0.0.1:{port}")
         gate(root, "triage", "b1", "--repro-confirmed")
-        git(root, "commit", "-q", "--allow-empty", "-m", "fix: 빈")
+        assert all(r["observed"] for r in ledger(root, "b1")["triage"]["runs"])  # 트리아지가 버그를 봤다
+        (root / "value.txt").write_text("good\n")
+        git(root, "commit", "-q", "-am", "fix: value")
         assert gate(root, "light-verify", "b1") == 0
         rec = ledger(root, "b1")["light_verifications"][-1]["repro"]
         assert rec["mode"] == "after-only" and not rec["after_observed"]
@@ -139,3 +140,31 @@ def test_light_without_ui_measures_after_only_and_labels(tmp_path):
     finally:
         server.terminate()
         server.wait()
+
+
+def test_control_cache_is_invalidated_by_a_serve_wrapper_change(tmp_path):
+    # 래퍼가 git 에 안 보이게 바뀌면(무시 · 레포 밖) 같은 HEAD 에서 캐시가 옛 control=True 를 준다 — 거짓 PASS
+    root, ws = _ready(tmp_path)
+    gate(root, "freeze", "b1")
+    red = red_commit(root)
+    gate(root, "baseline", "b1", "--red", "tests/red.sh")
+    fix_commit(root, red)
+    assert gate(root, "run", "b1") == 0
+    git(root, "update-index", "--skip-worktree", "bin/serve.sh")
+    # 새 래퍼는 주어진 트리를 무시하고 원본만 서빙한다 — 사본 측정이 무의미해져 VOID 여야 한다
+    (root / "bin" / "serve.sh").write_text(
+        bp_fixture.SERVE_SH.replace('"$1"', f'"{root}"'))
+    assert gate(root, "run", "b1") != 0
+
+
+def test_after_only_keeps_the_determinism_label_for_a_flaky_triage():
+    # 트리아지 3회가 [관측, 미관측, 관측] 이면 수정 후 한 번 안 보인 것은 증거가 아니다
+    led = {"track_changes": [],
+           "triage": {"runs": [{"exit": 0, "observed": True}, {"exit": 0, "observed": False},
+                               {"exit": 0, "observed": True}]},
+           "light_verifications": [{"repro": {"mode": "after-only", "after_exit": 0, "after_observed": False},
+                                    "regress": {"exit": 0, "new_red": []}}]}
+    labels = bp_gate._light_labels(led)
+    assert bp_gate.LABEL_NO_DETERMINISM in labels and bp_gate.LABEL_NO_BASELINE_REPRO in labels
+    led["triage"]["runs"][1]["observed"] = True
+    assert bp_gate.LABEL_NO_DETERMINISM not in bp_gate._light_labels(led)

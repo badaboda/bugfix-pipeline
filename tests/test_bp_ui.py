@@ -98,3 +98,31 @@ def test_child_processes_of_the_server_are_stopped(tmp_path):
         pass
     with pytest.raises(urllib.error.URLError):
         urllib.request.urlopen(url, timeout=2)
+
+
+def test_server_left_by_an_exiting_wrapper_is_stopped(tmp_path):
+    # 래퍼가 서버를 백그라운드로 두고 먼저 끝난다(exit 0) — 리더가 죽어도 그룹은 남는다(A3 리뷰 실측)
+    root, _ = _profile(tmp_path)
+    cmd = _script(root, "daemon.sh", bp_fixture.SERVE_SH.replace("exec python3", "python3")
+                  .replace('"$1"\n', '"$1" &\nexit 0\n'))
+    bp_fixture.write_profile(root, {**bp_fixture.UI_OVERRIDES, "ui.serve_cmd": [cmd]})
+    with bp_ui.serve(bp_profile.load(root), root, tmp_path / "serve.log") as url:
+        assert urllib.request.urlopen(url, timeout=5)
+    with pytest.raises(urllib.error.URLError):
+        urllib.request.urlopen(url, timeout=2)
+
+
+def test_wrapper_failing_while_a_child_holds_stdout_fails_fast(tmp_path):
+    # 자식이 stdout 을 쥐고 있으면 EOF 가 오지 않는다 — 리더의 비정상 종료로 즉시 실패하고 자식도 내린다
+    import os
+    root, _ = _profile(tmp_path)
+    pidfile = tmp_path / "child.pid"
+    cmd = _script(root, "fails.sh", f"#!/bin/sh\nsleep 30 &\necho $! > {pidfile}\necho boom\nexit 3\n")
+    bp_fixture.write_profile(root, {**bp_fixture.UI_OVERRIDES, "ui.serve_cmd": [cmd], "ui.ready_timeout_s": 60})
+    start = time.monotonic()
+    with pytest.raises(bp_ui.UiError, match="끝났다"):
+        with bp_ui.serve(bp_profile.load(root), root, tmp_path / "serve.log"):
+            pass
+    assert time.monotonic() - start < 10
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(pidfile.read_text()), 0)
