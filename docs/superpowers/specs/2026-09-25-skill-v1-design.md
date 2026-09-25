@@ -385,3 +385,7 @@ P6 PR      경로 지정 커밋 · push · PR (포지 CLI 가 없으면 가지 +
 - 버그별 표적 보강(결함의 기존 테스트가 `side_cmd` 수집 루트 밖에 있을 때) — 루브릭의 몫
 - 전수 CTA 스윕 — 별도 「메뉴 점검」 모드 후보
 - `bp_regress` 리뷰에서 미룬 Minor 6건
+- A3(`bp_ui`) 리뷰에서 미룬 Minor 7건 — `needs_ui: yes` 인데 `R-SYMPTOM` 에 `{url}` 이 없어도 동결 · 서버 로그 이름이
+  초 단위로 겹침 · 게이트가 SIGTERM/SIGHUP 을 받으면 서버가 남음 · join 시간 초과 뒤 로그를 닫음 · 준비 전 출력 줄마다
+  `grep` 하나 · §3.1·§9 의 `bp_ui.py serve` CLI 없음(`check` 와 파이썬 `serve()` 만) · `needs_ui` 가 `yes/true/1/예` 밖이면
+  경고 없이 비화면으로
