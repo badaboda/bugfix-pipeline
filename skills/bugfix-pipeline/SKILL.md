@@ -84,6 +84,7 @@ description: "버그 수정 요청 하나를 원인 규명 → 수정 → 결정
 3. `bugfix-pipeline:bug-sweep-gate` — 관련 후보만 확정·기각 → `gate_round<N>.md`.
 4. 확정 회귀마다 `bp_gate.py record-sweep <slug> --regression <작업공간 안 근거 파일>` — 진리표가 `CODE` 를 낸다(cap 에 들어간다). exit 4 면 `DEFERRED` — 🛑 남은 후보를 기록하지 말고 멈춘다. 아니면 P3.
 5. 비관련 이상은 판정하지 않는다 — GATE 2 에 「관찰(미판정)」.
+6. 브라우저 도구가 작업 트리에 남긴 산출물(예: Playwright MCP 의 `.playwright-mcp/`)은 스윕 뒤 지운다 — 남으면 다음 `run` 이 «더러운 트리»로 거부한다(종단 실측).
 
 ## 5. P6 — PR
 
