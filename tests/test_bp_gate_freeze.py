@@ -82,3 +82,21 @@ def test_refreeze_records_a_cause_change(tmp_path):
     led = ledger(root, "b1")
     assert led["cause_id"] == "value-02"
     assert led["cause_changes"][-1]["from_cause"] == "value-01"
+
+
+def test_code_braces_in_inline_probes_are_not_placeholders(tmp_path):
+    # 종단 실측(TS 라이브러리): 인라인 node -e 의 객체 리터럴 · 블록이 «모르는 자리표시자»로 거부됐다 —
+    # 조사자 문서는 probe 를 인라인으로 쓰라고 한다. 자리표시자는 중괄호 안 «소문자 한 단어»뿐이다
+    code = 'const j=require("jiti")(__filename,{fsCache:false});for(const s of ["a"]){if(s)process.exit(0)}'
+    ok = _rubric(**{"R-CAUSE": {"probe": ["{exec}", "{tree}", "--", "node", "-e", code]}})
+    root, _ = formal_ready(tmp_path, rubric=ok)
+    assert gate(root, "freeze", "b1") == 0
+
+
+def test_unfilled_expected_after_placeholder_in_assert_is_refused(tmp_path, capsys):
+    # 조사자는 R-SYMPTOM.assert 에 자리표시만 남긴다 — 리더가 GATE 1 에서 옮기지 않으면 매번 FAIL 이 ANCHOR 로 읽힌다
+    rub = _rubric(**{"R-SYMPTOM": {"probe": RUBRIC_OK["R-SYMPTOM"]["probe"],
+                                   "assert": ["grep", "-q", "-F", "-e", "<expected_after 의 문구>", "{out}"]}})
+    root, _ = formal_ready(tmp_path, rubric=rub)
+    assert gate(root, "freeze", "b1") == 2
+    assert "expected_after" in capsys.readouterr().err

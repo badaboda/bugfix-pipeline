@@ -22,7 +22,7 @@ description: "버그 수정 요청 하나를 원인 규명 → 수정 → 결정
 ## 1. P0 — 접수 · 트리아지 (두 트랙 공통)
 
 1. **재현 동결** — 사용자가 본 것을 `bp_gate.py init <slug>` 가 만든 `repro.md` 에 적는다: `steps` · `observed`(출력에 그대로 나올 문구) · `where` · `needs_ui`(앱 화면이 필요하면 `yes`) · `url`(프로파일에 `ui` 가 없을 때 사용자 개발 서버). `expected_after` 는 **비운다.**
-2. **재현 자동화** — `steps` 를 `repro.sh` 로 옮긴다(**`steps` 가 이미 명령이어도** 감싼다 — 게이트는 `repro.sh` 만 잰다. 없으면 트리아지가 비결정 → 가벼운 트랙): `repro.sh <트리> [<URL>]`, `observed` 를 **출력으로 드러낸다.** 한 번 돌린 출력을 사용자에게 보이고 **「이게 내가 본 것」 확인**을 받는다 — 🛑 하드 스톱. 옮길 수 없으면(외부 결제 · 실기기 · 운영 데이터 전용) 사유를 `repro.md` 에 적는다.
+2. **재현 자동화** — `steps` 를 `repro.sh` 로 옮긴다(**`steps` 가 이미 명령이어도** 감싼다 — 게이트는 `repro.sh` 만 잰다. 없으면 트리아지가 비결정 → 가벼운 트랙): `repro.sh <트리> [<URL>]`, `observed` 를 **출력으로 드러낸다.** 한 번 돌린 출력을 사용자에게 보이고 **「이게 내가 본 것」 확인**을 받는다 — 🛑 하드 스톱. 화면 재현(`needs_ui: yes`)이고 프로파일에 `ui` 가 있으면 `bp_gate.py serve <slug> --side after` 를 백그라운드로 띄워 그 `BP_URL` 로 한 번 돌리고 SIGTERM 으로 내린다(`ui` 가 없으면 `url:` 의 사용자 서버). 옮길 수 없으면(외부 결제 · 실기기 · 운영 데이터 전용) 사유를 `repro.md` 에 적는다.
 3. `bp_gate.py triage <slug> [--repro-confirmed] [--light]` — 재현 3 회 · 스위트 유무 · 사용자가 「가볍게」를 말했는지로 트랙을 **잰다.** 결정적 + 스위트 + 가볍게 아님 → 정식, 그 밖 → 가벼운. 결과는 `ledger.json`.
 4. (선택) `$PLUGIN/hooks/install.sh install` — `RED:` 규칙을 더 일찍 알려 주는 git 훅. 거부되면 경고만 — 집행은 게이트의 커밋 감사다.
 

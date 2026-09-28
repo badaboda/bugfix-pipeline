@@ -64,3 +64,16 @@ def test_copied_wrappers_are_executable(tmp_path):
     init(tmp_path)
     for name in ("bp_side.sh", "bp_exec.sh"):
         assert (tmp_path / ".claude" / "bugfix-pipeline" / name).stat().st_mode & 0o111
+
+
+def test_vitest_declared_in_package_json_is_a_signal(tmp_path):
+    # 종단 실측(공개 OSS ufo): 설정 파일 없이 package.json devDependencies 로만 vitest 를 쓴다
+    (tmp_path / "package.json").write_text(json.dumps({"devDependencies": {"vitest": "^4"}}))
+    assert init(tmp_path) == 0
+    data = json.loads((tmp_path / PROFILE_PATH).read_text())
+    assert data["regress"]["tree_marker"] == "package.json"
+
+
+def test_package_json_without_vitest_is_not_a_signal(tmp_path):
+    (tmp_path / "package.json").write_text(json.dumps({"devDependencies": {"jest": "^29"}}))
+    assert init(tmp_path) == 2

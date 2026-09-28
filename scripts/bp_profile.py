@@ -245,12 +245,24 @@ STACK_SIGNALS = {
 }
 
 
+def _declares_vitest(root) -> bool:
+    # 설정 파일 없이 package.json 선언만으로 vitest 를 쓰는 레포가 흔하다(종단 실측) — 선언은 추정이 아니다
+    try:
+        pkg = json.loads((root / "package.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(pkg, dict) and any(
+        isinstance(pkg.get(k), dict) and "vitest" in pkg[k] for k in ("dependencies", "devDependencies"))
+
+
 def _detect(root):
     found = {}
     for stack, files in STACK_SIGNALS.items():
         hit = next((f for f in files if (root / f).is_file()), None)
         if hit:
             found[stack] = hit
+    if "vitest" not in found and _declares_vitest(root):
+        found["vitest"] = "package.json"
     return found
 
 

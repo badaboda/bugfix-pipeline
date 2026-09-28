@@ -205,7 +205,8 @@ def _argv(value, name, required, problems, allow_url=False):
         problems.append(f"{name} 는 비어 있지 않은 문자열 배열이어야 한다")
         return
     for tok in value:
-        for ph in re.findall(r"\{[^{}]*\}", tok):
+        # 자리표시자는 중괄호 안 «소문자 한 단어»뿐 — 인라인 코드의 객체 리터럴·블록은 건드리지 않는다(종단 실측)
+        for ph in re.findall(r"\{[a-z_]+\}", tok):
             if ph == "{url}":
                 if not allow_url:
                     problems.append(f"{name}: {{url}} 은 프로파일에 ui 가 있어야 쓸 수 있다")
@@ -228,6 +229,8 @@ def _validate_rubric(root, ws, rub, problems, allow_url):
             problems.append(f"{row} 모르는 키: {k}")
         _argv(r.get("probe"), f"{row}.probe", True, problems, allow_url)
         _argv(r.get("assert"), f"{row}.assert", False, problems, allow_url)
+        if any(isinstance(t, str) and t.startswith("<expected_after") for t in r.get("assert") or []):
+            problems.append(f"{row}.assert 에 expected_after 자리표시가 남았다 — GATE 1 에서 채운 문구로 옮긴다")
     patches = []
     ctl = rub.get("R-CONTROL")
     if not isinstance(ctl, dict) or not isinstance(ctl.get("axes"), list) or not ctl["axes"]:

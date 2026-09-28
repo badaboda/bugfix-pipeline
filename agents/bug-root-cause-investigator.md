@@ -33,7 +33,7 @@ exit **125** 는 «환경을 조립하지 못했다»이지 FAIL 이 아니다. 
 - **`tree` 의 추적 파일은 건드리지 않는다.** 로그 한 줄, `print` 하나도 넣지 않는다.
 - 계측이 꼭 필요하면 `workspace` 안 **사본**에서 하고, 그 사본을 산출물로 남긴다.
 - `R-CONTROL` 변이는 **patch 로 써 두기만** 한다(`control/*.diff`). 적용해서 돌리는 것은 게이트(`bp_gate.py run`)다.
-- 🔴 patch 는 **수정 «후»의 HEAD 사본**에 적용된다 — 너는 수정 모양을 모른다. 수정이 어떻게 생기든 적용되게 쓴다(예: 파일 «끝»에 원인을 되살리는 재정의를 덧붙이는 patch). 지금 트리에 `git apply --check` 가 통과하는 것만으로는 부족하다. 가장 튼튼한 축은 `@baseline` 이다.
+- 🔴 patch 는 **수정 «후»의 HEAD 사본**에 적용된다 — 너는 수정 모양을 모른다. 수정이 어떻게 생기든 적용되게 쓴다(예: 파이썬은 파일 «끝»에 원인을 되살리는 재정의를 덧붙이는 patch. ES 모듈·TS 는 같은 이름 재선언이 오류이므로 **새 파일**에 되살린 구현을 두고 진입점 끝에서 그 이름을 다시 export 하는 patch). 지금 트리에 `git apply --check` 가 통과하는 것만으로는 부족하다. 가장 튼튼한 축은 `@baseline` 이다.
 - probe 는 `rubric.json` 안에 **인라인**으로 쓴다(`python -c …` · 테스트 id). 작업공간의 별도 스크립트는 동결 집합 밖이라 판정 중에 바뀌어도 게이트가 모른다.
 
 ## 조사 순서
@@ -81,7 +81,8 @@ exit **125** 는 «환경을 조립하지 못했다»이지 FAIL 이 아니다. 
 
 - `invariant` 는 **값 이름을 박지 않는다.** ✗ "`year` 가 2027" ○ "화면이 자기가 보여 주는 기간을 명시한다".
 - `fix_scope` 는 GATE 1 에서 사용자가 승인하는 **허용 파일 목록**이다. 넓게 적으면 범위가 조용히 넓어진다.
-- `affected_routes` 는 원인 코드를 쓰는 다른 화면 — P5b 스윕 대상이 된다. 모르면 `routes` 와 같게 두고 그렇다고 적는다.
+- `affected_routes` 는 원인 코드를 쓰는 다른 화면 — P5b 스윕 대상이 된다. 패턴(`/product/*`)이 아니라 스위퍼가 열 수 있는 **구체 경로**로 쓴다. 모르면 `routes` 와 같게 두고 그렇다고 적는다.
+- 같은 결함이 다른 자리에도 있으면(형제 결함) 한 번의 수정으로 함께 고쳐지는 한 **같은 `cause_id`** 로 `fix_scope` · `affected_routes` 에 넣는다. 따로 고쳐야 하면 따로 보고한다.
 - 화면이 없는 라이브러리 · CLI 면 `routes` 에 공개 심볼이나 명령(`pkg.func` · `tool sub`)을 쓴다 — P5b 는 `ui` 가 없어 생략된다.
 
 ## 산출물 2 — `rubric.json` 초안 (`BUG` · `NOT-A-BUG`)
@@ -91,7 +92,7 @@ exit **125** 는 «환경을 조립하지 못했다»이지 FAIL 이 아니다. 
   "cause_id": "<slug>-01",
   "R-CAUSE":   { "probe": ["{exec}", "{tree}", "--", "<불변식을 재는 명령>"] },
   "R-SYMPTOM": { "probe": ["{exec}", "{tree}", "--", "sh", "{repro}", "{tree}"],
-                 "assert": ["grep", "-q", "-x", "-F", "-e", "<expected_after 의 문구>", "{out}"] },
+                 "assert": ["grep", "-q", "-F", "-e", "<expected_after 의 문구>", "{out}"] },
   "R-CONTROL": { "axes": [
       { "name": "수정 되돌림", "mutate": { "checkout": "@baseline" } },
       { "name": "<원인 재주입>", "mutate": { "patch": "control/<이름>.diff" },
@@ -100,9 +101,12 @@ exit **125** 는 «환경을 조립하지 못했다»이지 FAIL 이 아니다. 
 ```
 
 - 자리표시자: `{exec}`(exec 래퍼) · `{tree}`(측정 트리) · `{out}`(그 행 probe 출력 파일) · `{repro}`(작업공간 `repro.sh` 절대경로) · `{url}`(그 트리로 띄운 앱 URL — 프로파일에 `ui` 가 있고 `needs_ui: yes` 일 때만). 그 밖은 `freeze` 가 거부한다.
-- `assert` 가 없으면 probe 종료코드 0 이 통과다. `grep` 은 `-e` 로 문구를 넘긴다(`-` 로 시작하는 문구). 테스트 러너 출력을 grep 하면 색을 끈다(pytest `--color=no`).
+- `assert` 가 없으면 probe 종료코드 0 이 통과다. `grep` 은 `-e` 로 문구를 넘긴다(`-` 로 시작하는 문구). 테스트 러너 출력을 grep 하면 색을 끈다(pytest `--color=no` · vitest 는 파이프로 받으면 색이 없다). 자리표시자는 중괄호 안 소문자 한 단어(`{tree}` 등)뿐이다 — 인라인 코드의 `{…}` 는 그대로 둬도 된다.
 - R-CAUSE 가 «고쳐지면 통과할 수 있는지» 확인하고 싶으면 `tree` 밖 사본에서만 한다. `tree` 는 건드리지 않고, 그 확인은 `investigation.md` 에 «흉내 낸 수정으로 확인»이라고 적는다.
 - **`R-REGRESS` 는 쓰지 않는다** — 게이트가 전체 스위트로 고정 실행한다.
+- `R-SYMPTOM.assert` 의 `<expected_after 의 문구>` 는 **그대로 남긴다** — 리더가 GATE 1 에서 옮기고, 남아 있으면 `freeze` 가 거부한다. 출력이 한 줄 결과면 `-x` 를 더해도 되고, HTML 처럼 한 줄에 많은 것이 오면 `-F` 부분 일치로 둔다. 화면 재현(`needs_ui: yes`)이면 probe 에 `{url}` 을 넘긴다(`sh {repro} {tree} {url}`).
+- `R-CONTROL` 은 **`R-CAUSE` 만** 다시 잰다. 그래서 `R-CAUSE` 는 가능하면 import·단위 수준으로 둔다 — 서버를 띄워 재는 행이면 변이 patch 가 서버 기동 «전»에 로드되는 자리를 바꿔야 한다(파일 끝 재정의는 `serve_forever()` 뒤라 안 먹는다).
+- 셸·JSON 두 겹 이스케이프를 피한다 — 정규식의 `$` 는 `[$]` 처럼 쓴다.
 - `R-CONTROL` 축은 사본에 변이를 걸고 `R-CAUSE` 를 잰다 — **빨개져야** 통과. 검사가 두 조건에 걸리면 **두 축을 다** 흔든다.
 - probe 는 **재실행 가능**해야 한다. 「화면을 보면 안다」는 probe 가 아니다 — 화면 재현이면 `repro.sh` 와 `{url}` 로.
 - 표본은 **전수**다. 추첨하지 않는다.
