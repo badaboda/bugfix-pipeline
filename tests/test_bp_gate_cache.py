@@ -68,3 +68,43 @@ def test_record_sweep_counts_a_code(tmp_path):
 def test_record_sweep_evidence_must_be_in_the_workspace(tmp_path):
     root, ws, red = _at_p3(tmp_path)
     assert gate(root, "record-sweep", "b1", "--regression", "../../value.txt") == 2
+
+
+def _passed(tmp_path):
+    root, ws, red = _at_p3(tmp_path)
+    fix_commit(root, red)
+    assert gate(root, "run", "b1") == 0
+    return root, ws
+
+
+def _pr_body(root, ws):
+    gate(root, "status", "b1", "--pr-body")
+    return (ws / "pr_body.md").read_text()
+
+
+def test_pr_body_says_when_p5b_was_not_recorded(tmp_path):
+    # 종단 2회차: 정식 PR 본문에 P5b 결과가 없었다 — 기록이 없으면 «없다»가 드러나야 한다
+    root, ws = _passed(tmp_path)
+    assert "P5b: 기록 없음" in _pr_body(root, ws)
+
+
+def test_clean_sweep_is_recorded_without_a_verdict(tmp_path):
+    root, ws = _passed(tmp_path)
+    (ws / "gate_round1.md").write_text("후보 5 · 확정 0 · 기각 5")
+    assert gate(root, "record-sweep", "b1", "--clean", "gate_round1.md") == 0
+    led = ledger(root, "b1")
+    assert led["code_count"] == 0 and led["sweeps"][-1]["kind"] == "clean"
+    assert "P5b: 확정 회귀 0" in _pr_body(root, ws)
+
+
+def test_skipped_sweep_reason_reaches_the_pr_body(tmp_path):
+    root, ws = _passed(tmp_path)
+    assert gate(root, "record-sweep", "b1", "--skipped", "ui 없음") == 0
+    assert "P5b: 생략 — ui 없음" in _pr_body(root, ws)
+
+
+def test_record_sweep_takes_exactly_one_outcome(tmp_path):
+    root, ws = _passed(tmp_path)
+    (ws / "g.md").write_text("x")
+    assert gate(root, "record-sweep", "b1", "--clean", "g.md", "--skipped", "ui 없음") == 2
+    assert gate(root, "record-sweep", "b1") == 2

@@ -76,22 +76,23 @@ description: "버그 수정 요청 하나를 원인 규명 → 수정 → 결정
 
 ## 4. P5b — 관련 범위 스윕 (정식 트랙)
 
-**생략 조건** — GATE 2 에 사유를 적는다: `root_cause.json` 의 `user_facing: false` · 프로파일에 `ui` 없음 · 쓸 수 있는 브라우저 도구 없음.
+**생략 조건** — `user_facing: false` · 프로파일에 `ui` 없음 · 쓸 수 있는 브라우저 도구 없음. 생략하면 `bp_gate.py record-sweep <slug> --skipped "<사유>"` 로 기록한다 — 기록이 없으면 PR 본문에 «P5b: 기록 없음»이 찍힌다.
 
 1. 두 쪽을 백그라운드로 띄운다 — `bp_gate.py serve <slug> --side baseline` (기준선 사본, 레포 밖) · `bp_gate.py serve <slug> --side after` (현재 트리). 각각 stdout 첫 `BP_URL=<url>` 줄이 URL 이다.
    끝나면 **둘 다** SIGTERM 으로 내린다(어떤 종료 경로에서든) — 게이트가 서버 그룹과 사본을 치운다. 래퍼 점검은 `python3 $BP/bp_ui.py check`.
 2. `bugfix-pipeline:bug-cta-sweeper` — 두 URL · `routes` ∪ `affected_routes` · 계정 상태 → `sweep.json` · `sweep.md`.
 3. `bugfix-pipeline:bug-sweep-gate` — 관련 후보만 확정·기각 → `gate_round<N>.md`.
 4. 확정 회귀마다 `bp_gate.py record-sweep <slug> --regression <작업공간 안 근거 파일>` — 진리표가 `CODE` 를 낸다(cap 에 들어간다). exit 4 면 `DEFERRED` — 🛑 남은 후보를 기록하지 말고 멈춘다. 아니면 P3.
-5. 비관련 이상은 판정하지 않는다 — GATE 2 에 「관찰(미판정)」.
-6. 브라우저 도구가 작업 트리에 남긴 산출물(예: Playwright MCP 의 `.playwright-mcp/`)은 스윕 뒤 지운다 — 남으면 다음 `run` 이 «더러운 트리»로 거부한다(종단 실측).
+5. 확정 회귀가 없으면 `bp_gate.py record-sweep <slug> --clean gate_round<N>.md` 로 결과를 남긴다(판정·cap 에 영향 없음).
+6. 비관련 이상은 판정하지 않는다 — GATE 2 에 「관찰(미판정)」.
+7. 브라우저 도구가 작업 트리에 남긴 산출물(예: Playwright MCP 의 `.playwright-mcp/`)은 스윕 뒤 지운다 — 남으면 다음 `run` 이 «더러운 트리»로 거부한다(종단 실측).
 
 ## 5. P6 — PR
 
 - 정식: `bp_gate.py status <slug> --pr-body` 가 `pr_body.md` 를 쓴다. 가벼운: `light-report` 가 이미 썼다.
 - **PR 본문은 `pr_body.md` 만 쓴다.** 명령 출력 원문(토큰 · `.env` 값 · 내부 URL 이 섞일 수 있다)을 붙이지 않는다.
 - `gh`(GitHub) 또는 `glab`(GitLab) 이 있고 원격이 그 포지를 가리키면: 경로 지정 커밋 → push → PR/MR. 🛑 push 와 PR 은 사용자 승인 후 — 원격이 사용자의 것이 아니면(남의 OSS) 포크로 보낼지도 사용자가 정한다.
-- `pr_body.md` 는 한국어로 나온다 — 다른 언어가 필요한 곳이면 사용자 승인 전에 옮기고, 옮긴 것을 보인다(판정·표지·종료코드의 사실은 바꾸지 않는다).
+- 호스트 저장소가 영어권이면 `--lang en` 으로 쓴다(`bp_gate.py status <slug> --pr-body --lang en` · `bp_gate.py light-report <slug> --lang en`). 원인 요약(`light_cause.json` 의 `summary`)은 에이전트가 쓴 언어 그대로 들어가니 그 언어로 쓰게 배정한다.
 - 없으면 가지를 push 하고(원격이 있으면) `pr_body.md` 경로를 알린 뒤 **멈춘다** — 포지를 추측하지 않는다.
 - 끝나면 `bp_gate.py status <slug> --close done` (버리면 `--close abandoned`). 훅을 설치했으면 `$PLUGIN/hooks/install.sh uninstall`.
 

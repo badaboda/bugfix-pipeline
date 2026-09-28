@@ -99,3 +99,27 @@ def test_formal_pr_body_has_no_output(tmp_path):
     assert gate(root, "status", "b1", "--pr-body") == 0
     body = (ws / "pr_body.md").read_text()
     assert "SECRET-TOKEN-bp42" not in body and "PASS" in body
+
+
+def test_light_pr_body_in_english(tmp_path):
+    # 종단 1회차: pr_body.md 가 한국어 고정이라 영어권 저장소에 그대로 못 올렸다
+    root, ws = light_ready(tmp_path, overrides={"regress": None})
+    _fix(root)
+    gate(root, "light-verify", "b1")
+    assert gate(root, "light-report", "b1", "--lang", "en") == 0
+    body = (ws / "pr_body.md").read_text()
+    assert "Track: light" in body and "regression not verified" in body
+    assert not any("가" <= ch <= "힣" for ch in body)   # 한글 0
+
+
+def test_formal_pr_body_in_english(tmp_path):
+    root, ws = formal_ready(tmp_path)
+    gate(root, "freeze", "b1")
+    red = red_commit(root)
+    gate(root, "baseline", "b1", "--red", "tests/red.sh")
+    fix_commit(root, red)
+    gate(root, "run", "b1")
+    assert gate(root, "status", "b1", "--pr-body", "--lang", "en") == 0
+    body = (ws / "pr_body.md").read_text()
+    assert "Track: formal" in body and "P5b: not recorded" in body
+    assert not any("가" <= ch <= "힣" for ch in body)

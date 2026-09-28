@@ -168,3 +168,31 @@ def test_after_only_keeps_the_determinism_label_for_a_flaky_triage():
     assert bp_gate.LABEL_NO_DETERMINISM in labels and bp_gate.LABEL_NO_BASELINE_REPRO in labels
     led["triage"]["runs"][1]["observed"] = True
     assert bp_gate.LABEL_NO_DETERMINISM not in bp_gate._light_labels(led)
+
+
+def test_ui_repro_without_url_in_symptom_is_refused(tmp_path, capsys):
+    # A3 리뷰 Minor: needs_ui 인데 R-SYMPTOM 이 {url} 을 안 넘기면 repro.sh 가 빈 $2 로 돌아 ANCHOR 로 오분류된다
+    root, ws = formal_ready(tmp_path, overrides=UI_OVERRIDES)
+    (ws / "repro.md").write_text("steps: 화면\nobserved: bad\nwhere: 로컬\nneeds_ui: yes\nexpected_after: good\n")
+    assert gate(root, "freeze", "b1") == 2
+    assert "{url}" in capsys.readouterr().err
+
+
+def test_unknown_needs_ui_value_is_refused(tmp_path, capsys):
+    # A3 리뷰 Minor: `needs_ui: y` 가 조용히 «화면 아님»으로 읽혔다
+    root = make_gate_host(tmp_path, UI_OVERRIDES)
+    gate(root, "init", "b1")
+    ws = root / ".bugfix-pipeline" / "b1"
+    (ws / "repro.md").write_text("steps: x\nobserved: bad\nwhere: y\nneeds_ui: y\nexpected_after:\n")
+    (ws / "repro.sh").write_text(REPRO_URL_SH)
+    assert gate(root, "triage", "b1", "--repro-confirmed") == 2
+    assert "needs_ui" in capsys.readouterr().err
+
+
+def test_triage_serve_logs_do_not_overwrite_each_other(tmp_path):
+    # A3 리뷰 Minor: 초 단위 이름이라 트리아지 3 회가 같은 로그를 덮었다
+    root = make_gate_host(tmp_path, UI_OVERRIDES)
+    gate(root, "init", "b1")
+    _ui_repro(root / ".bugfix-pipeline" / "b1")
+    gate(root, "triage", "b1", "--repro-confirmed")
+    assert len(list((root / ".bugfix-pipeline" / "b1" / "serve").glob("*.log"))) == 3

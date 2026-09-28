@@ -387,10 +387,7 @@ P6 PR      경로 지정 커밋 · push · PR (포지 CLI 가 없으면 가지 +
 - Windows 네이티브 · 네이티브 UI 스윕
 - 버그별 표적 보강(결함의 기존 테스트가 `side_cmd` 수집 루트 밖에 있을 때) — 루브릭의 몫
 - 전수 CTA 스윕 — 별도 「메뉴 점검」 모드 후보
-- 정식 트랙 `pr_body.md` 에 P5b 결과(후보·확정·생략 사유)가 없다 — 게이트가 P5b 실행을 기록하지 않는다(종단 2회차)
+- (해소 0.2.2) 정식 `pr_body.md` 의 P5b 결과 — `record-sweep --clean|--skipped` 기록
 - 계획 B 리뷰에서 미룬 Minor 2건 — 파일명 린트가 레포 어디든 있는 이름을 받는다(느슨함) · 원천 결합어 목록이 짧다(`INDEX.md` · `localhost:` 포트 등)
 - `bp_regress` 리뷰에서 미룬 Minor 6건
-- A3(`bp_ui`) 리뷰에서 미룬 Minor 6건(serve CLI 는 계획 B 의 `bp_gate.py serve` 로 해소) — `needs_ui: yes` 인데 `R-SYMPTOM` 에 `{url}` 이 없어도 동결 · 서버 로그 이름이
-  초 단위로 겹침 · 게이트가 SIGTERM/SIGHUP 을 받으면 서버가 남음 · join 시간 초과 뒤 로그를 닫음 · 준비 전 출력 줄마다
-  `grep` 하나 · `needs_ui` 가 `yes/true/1/예` 밖이면
-  경고 없이 비화면으로
+- A3(`bp_ui`) 리뷰에서 미룬 Minor 3건(0.2.2 에서 `{url}` 없는 화면 루브릭 · 로그 이름 겹침 · 모르는 `needs_ui` 값 해소) — 게이트가 SIGTERM/SIGHUP 을 받으면 `run` 중 띄운 서버가 남음 · join 시간 초과 뒤 로그를 닫음 · 준비 전 출력 줄마다 `grep` 하나

@@ -279,6 +279,10 @@ def _validate_frozen_set(root, ws, profile):
         elif v not in ("BUG", "NOT-A-BUG"):
             problems.append(f"root_cause.verdict 가 BUG/NOT-A-BUG 가 아니다: {v!r}")
     patches = _validate_rubric(root, ws, rub, problems, profile.ui is not None) if rub is not None else []
+    if rub is not None and profile.ui is not None and _needs_ui(ws) and isinstance(rub.get("R-SYMPTOM"), dict) \
+            and not _needs_url(rub["R-SYMPTOM"]):
+        # 화면 재현인데 URL 을 안 넘기면 repro.sh 가 빈 $2 로 돌아 매번 FAIL — ANCHOR 로 오분류된다(A3 리뷰)
+        problems.append("needs_ui: yes 인데 R-SYMPTOM 에 {url} 이 없다 — sh {repro} {tree} {url} 로 넘긴다")
     if rc is not None and rub is not None and rc.get("cause_id") != rub.get("cause_id"):
         problems.append("root_cause.json 과 rubric.json 의 cause_id 가 다르다")
     if problems:
@@ -429,8 +433,16 @@ def _refund_last(led, entry):
     entry["refunded"] = last["n"]
 
 
+_UI_YES = ("yes", "true", "1", "예")
+_UI_NO = ("", "no", "false", "0", "아니오")
+
+
 def _needs_ui(ws):
-    return _repro_fields(ws).get("needs_ui", "").lower() in ("yes", "true", "1", "예")
+    v = _repro_fields(ws).get("needs_ui", "").strip().lower()
+    if v not in _UI_YES + _UI_NO:
+        # 모르는 값을 «화면 아님»으로 읽으면 repro.sh 가 URL 없이 돈다(A3 리뷰)
+        raise GateError(f"repro.md 의 needs_ui 값을 모른다: {v!r} — yes 또는 no(빈칸)")
+    return v in _UI_YES
 
 
 def _repro_exec(profile, root, ws, tree, extra):
@@ -447,7 +459,7 @@ def _run_repro(profile, root, ws, tree, allow_user_url=False):
         logdir = ws / "serve"
         logdir.mkdir(exist_ok=True)
         try:
-            with bp_ui.serve(profile, tree, logdir / f"{time.strftime('%H%M%S')}-{tree.name}.log") as url:
+            with bp_ui.serve(profile, tree, logdir / f"{len(list(logdir.glob('*.log'))) + 1:03d}-{tree.name}.log") as url:
                 return _repro_exec(profile, root, ws, tree, [url])
         except bp_ui.UiError as e:
             return ENV_FAILED, f"화면 서버: {e}"
@@ -778,11 +790,24 @@ def cmd_record_sweep(root, a):
     led = _load(ws)
     if led["track"] != "formal" or led["frozen"] is None:
         raise GateError("record-sweep 은 정식 트랙 · 동결 이후에")
-    ev = (ws / a.regression).resolve()
+    sweeps = led.setdefault("sweeps", [])
+    if a.skipped is not None:
+        sweeps.append({"kind": "skipped", "reason": a.skipped, "at": _now(), "head": _head(root)})
+        _save(ws, led)
+        print(f"record-sweep: 생략 — {a.skipped}")
+        return EXIT_OK
+    rel = a.regression or a.clean
+    ev = (ws / rel).resolve()
     if ws.resolve() not in ev.parents or not ev.is_file():
-        raise GateError(f"근거 파일은 작업공간 안에 있어야 한다: {a.regression}")
+        raise GateError(f"근거 파일은 작업공간 안에 있어야 한다: {rel}")
+    if a.clean:
+        sweeps.append({"kind": "clean", "evidence": rel, "at": _now(), "head": _head(root)})
+        _save(ws, led)
+        print(f"record-sweep: 회귀 없음 — {rel}")
+        return EXIT_OK
     if led["phase"] == "DEFERRED" or led["code_count"] >= CAP:
         raise GateError(f"cap 도달 ({led['code_count']}/{CAP}) — DEFERRED", EXIT_CAP)
+    sweeps.append({"kind": "regression", "evidence": rel, "at": _now(), "head": _head(root)})
     # P5b 는 cap 을 직접 세지 않는다 — 확정 회귀를 R-REGRESS 실패로 표현해 같은 진리표에 넣는다
     args = {"probe_ok": True, "control": True, "cause": True, "symptom": True, "regress": False}
     return _judge(ws, led, _head(root), args, {"R-REGRESS": {"sweep_evidence": str(ev)}}, "sweep")
@@ -874,6 +899,55 @@ def _changed_files(root, base):
     return _git(root, "diff", "--name-only", f"{base}..HEAD", check=True).stdout.split()
 
 
+# PR 본문 문구 — 호스트 저장소의 언어로(종단 1회차: 영어권 OSS 에 한국어 고정 본문). 사실(판정·표지·종료코드)은 같다
+_PR_TEXT = {
+    "ko": {"title": "## 버그 수정 — {slug}", "light": "트랙: 가벼운", "formal": "트랙: 정식", "labels": "표지: {v}",
+           "none": "없음", "cause": "원인: `{f}:{l}` — {s}", "cause_formal": "원인: `{f}:{l}` (cause_id {c})",
+           "repro_det": "재현: 수정 전 재현={b}(exit {be}) · 수정 후 재현={a}(exit {ae})",
+           "repro_after": "재현: 수정 후만(ui 없음) 재현={a}(exit {ae})",
+           "repro_rep": "재현: {n}회 중 {h}회 관측 (비결정)", "regress": "회귀: exit {e}", "new_red": " · 새 빨강 {v}",
+           "changed": "변경 파일:", "verdict": "판정: {v} · 루프 {n}/{cap}", "cause_changes": "원인 교체: {n}",
+           "red": "RED 커밋: {v}", "off": "카드 밖 변경 파일: {v}", "p5b_none": "P5b: 기록 없음",
+           "p5b_skip": "P5b: 생략 — {v}", "p5b": "P5b: 확정 회귀 {n} · 마지막 스윕 {v}",
+           "p5b_clean": "회귀 없음", "p5b_reg": "회귀 확정",
+           LABEL_NO_DETERMINISM: LABEL_NO_DETERMINISM, LABEL_NO_REGRESS: LABEL_NO_REGRESS,
+           LABEL_NO_BASELINE_REPRO: LABEL_NO_BASELINE_REPRO},
+    "en": {"title": "## Bug fix — {slug}", "light": "Track: light", "formal": "Track: formal", "labels": "Labels: {v}",
+           "none": "none", "cause": "Cause: `{f}:{l}` — {s}", "cause_formal": "Cause: `{f}:{l}` (cause_id {c})",
+           "repro_det": "Repro: before fix reproduced={b} (exit {be}) · after fix reproduced={a} (exit {ae})",
+           "repro_after": "Repro: after fix only (no ui) reproduced={a} (exit {ae})",
+           "repro_rep": "Repro: observed {h} of {n} runs (non-deterministic)", "regress": "Regression suite: exit {e}",
+           "new_red": " · new failures {v}", "changed": "Changed files:", "verdict": "Verdicts: {v} · loop {n}/{cap}",
+           "cause_changes": "Cause changes: {n}", "red": "RED commit: {v}", "off": "Files outside fix scope: {v}",
+           "p5b_none": "P5b: not recorded", "p5b_skip": "P5b: skipped — {v}",
+           "p5b": "P5b: confirmed regressions {n} · last sweep {v}", "p5b_clean": "no regression",
+           "p5b_reg": "regression confirmed",
+           LABEL_NO_DETERMINISM: "no deterministic verdict", LABEL_NO_REGRESS: "regression not verified",
+           LABEL_NO_BASELINE_REPRO: "baseline not reproduced"},
+}
+
+
+def _light_pr_lines(led, last, labels, cause, changed, t):
+    body = [t["title"].format(slug=led["slug"]), "", t["light"],
+            t["labels"].format(v=", ".join(t[x] for x in labels) or t["none"])]
+    if cause.get("file"):
+        body.append(t["cause"].format(f=cause["file"], l=cause.get("line", "?"), s=cause.get("summary", "")))
+    if last and last["repro"]:
+        r = last["repro"]
+        if r["mode"] == "deterministic":
+            body.append(t["repro_det"].format(b=r["before_observed"], be=r["before_exit"],
+                                              a=r["after_observed"], ae=r["after_exit"]))
+        elif r["mode"] == "after-only":
+            body.append(t["repro_after"].format(a=r["after_observed"], ae=r["after_exit"]))
+        else:
+            body.append(t["repro_rep"].format(n=r["runs"], h=r["observed_hits"]))
+    if last and last["regress"]:
+        g = last["regress"]
+        body.append(t["regress"].format(e=g["exit"]) + (t["new_red"].format(v=", ".join(g["new_red"]))
+                                                         if g["new_red"] else ""))
+    return body + ["", t["changed"]] + [f"- `{f}`" for f in changed]
+
+
 def cmd_light_report(root, a):
     ws = _ws(root, a.slug)
     led = _load(ws)
@@ -886,22 +960,7 @@ def cmd_light_report(root, a):
     changed = _changed_files(root, led["base_sha"])
     cause = json.loads((ws / LIGHT_CAUSE).read_text()) if (ws / LIGHT_CAUSE).is_file() else {}
     # 🔴 PR 본문은 명령 출력 원문을 읽지 않는다 — 판정·종료코드·이름·표지·파일 목록만
-    body = [f"## 버그 수정 — {led['slug']}", "", "트랙: 가벼운", f"표지: {', '.join(labels) or '없음'}"]
-    if cause.get("file"):
-        body.append(f"원인: `{cause['file']}:{cause.get('line', '?')}` — {cause.get('summary', '')}")
-    if last and last["repro"]:
-        r = last["repro"]
-        if r["mode"] == "deterministic":
-            body.append(f"재현: 수정 전 재현={r['before_observed']}(exit {r['before_exit']}) · "
-                        f"수정 후 재현={r['after_observed']}(exit {r['after_exit']})")
-        elif r["mode"] == "after-only":
-            body.append(f"재현: 수정 후만(ui 없음) 재현={r['after_observed']}(exit {r['after_exit']})")
-        else:
-            body.append(f"재현: {r['runs']}회 중 {r['observed_hits']}회 관측 (비결정)")
-    if last and last["regress"]:
-        g = last["regress"]
-        body.append(f"회귀: exit {g['exit']}" + (f" · 새 빨강 {', '.join(g['new_red'])}" if g["new_red"] else ""))
-    body += ["", "변경 파일:"] + [f"- `{f}`" for f in changed]
+    body = _light_pr_lines(led, last, labels, cause, changed, _PR_TEXT[a.lang])
     (ws / PR_BODY).write_text("\n".join(body) + "\n", encoding="utf-8")
     report = body + ["", "---", "로컬 전용 — 원문 발췌"]
     vdir = ws / f"light_{len(led['light_verifications'])}"
@@ -950,18 +1009,31 @@ def cmd_serve(root, a):
             signal.signal(s, h)
 
 
-def _formal_pr_body(root, ws, led):
+def _formal_pr_body(root, ws, led, t):
     rc = json.loads((ws / ROOT_CAUSE).read_text()) if (ws / ROOT_CAUSE).is_file() else {}
     judged = [h for h in led["history"] if h.get("kind") in ("run", "sweep")]
     changed = _changed_files(root, led["baseline_sha"]) if led["baseline_sha"] else []
     off = sorted(set(changed) - set(rc.get("fix_scope", [])) - set(led["red_files"] or {}))
-    lines = [f"## 버그 수정 — {led['slug']}", "", "트랙: 정식",
-             f"원인: `{rc.get('file')}:{rc.get('line')}` (cause_id {led['cause_id']})",
-             f"판정: {' → '.join(h['attribution'] for h in judged) or '없음'} · 루프 {led['code_count']}/{CAP}",
-             f"원인 교체: {len(led['cause_changes'])}",
-             f"RED 커밋: {(led['red_commit'] or '')[:7]}",
-             f"카드 밖 변경 파일: {', '.join(off) or '0'}"]
+    lines = [t["title"].format(slug=led["slug"]), "", t["formal"],
+             t["cause_formal"].format(f=rc.get("file"), l=rc.get("line"), c=led["cause_id"]),
+             t["verdict"].format(v=" → ".join(h["attribution"] for h in judged) or t["none"],
+                                 n=led["code_count"], cap=CAP),
+             t["cause_changes"].format(n=len(led["cause_changes"])),
+             t["red"].format(v=(led["red_commit"] or "")[:7]),
+             t["off"].format(v=", ".join(off) or "0"),
+             _p5b_line(led.get("sweeps") or [], t)]
     return "\n".join(lines) + "\n"
+
+
+def _p5b_line(sweeps, t):
+    """P5b 는 기록된 것만 말한다 — 기록이 없으면 «없다»가 드러나야 한다(종단 2회차)."""
+    if not sweeps:
+        return t["p5b_none"]
+    last = sweeps[-1]
+    if last["kind"] == "skipped":
+        return t["p5b_skip"].format(v=last["reason"])
+    confirmed = sum(1 for s in sweeps if s["kind"] == "regression")
+    return t["p5b"].format(n=confirmed, v=t["p5b_clean"] if last["kind"] == "clean" else t["p5b_reg"])
 
 
 def cmd_status(root, a):
@@ -978,7 +1050,7 @@ def cmd_status(root, a):
     if a.pr_body:
         if led["track"] != "formal":
             raise GateError("가벼운 트랙의 PR 본문은 light-report 가 쓴다")
-        (ws / PR_BODY).write_text(_formal_pr_body(root, ws, led), encoding="utf-8")
+        (ws / PR_BODY).write_text(_formal_pr_body(root, ws, led, _PR_TEXT[a.lang]), encoding="utf-8")
         print(f"pr_body: {ws / PR_BODY}")
     last2 = [h["attribution"] for h in led["history"] if h.get("kind") == "run"][-2:]
     if len(last2) == 2 and set(last2) <= {"VOID", "ENV"}:
@@ -995,10 +1067,12 @@ def _parser():
     s.add_argument("slug")
     s.add_argument("--close", choices=sorted(_CLOSED))
     s.add_argument("--pr-body", action="store_true")
+    s.add_argument("--lang", choices=sorted(_PR_TEXT), default="ko")
     s = sub.add_parser("light-verify")
     s.add_argument("slug")
     s = sub.add_parser("light-report")
     s.add_argument("slug")
+    s.add_argument("--lang", choices=sorted(_PR_TEXT), default="ko")
     s = sub.add_parser("triage")
     s.add_argument("slug")
     s.add_argument("--light", action="store_true")
@@ -1023,7 +1097,10 @@ def _parser():
     s.add_argument("slug")
     s = sub.add_parser("record-sweep")
     s.add_argument("slug")
-    s.add_argument("--regression", required=True)
+    g = s.add_mutually_exclusive_group(required=True)
+    g.add_argument("--regression")
+    g.add_argument("--clean")
+    g.add_argument("--skipped")
     s = sub.add_parser("serve")
     s.add_argument("slug")
     s.add_argument("--side", required=True, choices=["baseline", "after"])
