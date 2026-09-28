@@ -66,7 +66,7 @@ hooks/install.sh uninstall   # 제거 (작업 가지 한정이므로 끝나면 �
 
 > 🔴 `git hook run <hook>` 은 훅이 **없을 때도 exit 1** 이다(`error: cannot find a hook named …`). 종료코드만 보면 「훅이 거부했다」와 「훅이 없다」가 같은 얼굴이라 거짓 초록이 난다 — 실측으로 확인했고, 그래서 `verify` 가 선행 조건과 표지 문구로 둘을 가른다.
 
-## 현재 상태 (v0.2.1)
+## 현재 상태 (v0.2.2)
 
 > 2026-09-25 기준. 각 행의 ✅ 는 테스트·실측으로 확인한 것이고 ❌·⚠️ 는 아직 안 잰 것이다. 설계와 알려진 공백: [`docs/superpowers/specs/2026-09-25-skill-v1-design.md`](docs/superpowers/specs/2026-09-25-skill-v1-design.md) §15.
 
