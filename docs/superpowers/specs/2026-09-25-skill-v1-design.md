@@ -387,6 +387,7 @@ P6 PR      경로 지정 커밋 · push · PR (포지 CLI 가 없으면 가지 +
 - Windows 네이티브 · 네이티브 UI 스윕
 - 버그별 표적 보강(결함의 기존 테스트가 `side_cmd` 수집 루트 밖에 있을 때) — 루브릭의 몫
 - 전수 CTA 스윕 — 별도 「메뉴 점검」 모드 후보
+- 정식 트랙 `pr_body.md` 에 P5b 결과(후보·확정·생략 사유)가 없다 — 게이트가 P5b 실행을 기록하지 않는다(종단 2회차)
 - 계획 B 리뷰에서 미룬 Minor 2건 — 파일명 린트가 레포 어디든 있는 이름을 받는다(느슨함) · 원천 결합어 목록이 짧다(`INDEX.md` · `localhost:` 포트 등)
 - `bp_regress` 리뷰에서 미룬 Minor 6건
 - A3(`bp_ui`) 리뷰에서 미룬 Minor 6건(serve CLI 는 계획 B 의 `bp_gate.py serve` 로 해소) — `needs_ui: yes` 인데 `R-SYMPTOM` 에 `{url}` 이 없어도 동결 · 서버 로그 이름이
