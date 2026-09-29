@@ -1,12 +1,14 @@
 #!/bin/sh
 # bugfix-pipeline 리더 감시 — 팀원이 «조용히 멈춘» 것을 리더가 알아챈다.
 #
-#   watch.sh <workspace> <완료 파일 이름> [정체 분]
+#   watch.sh <workspace> <완료 파일 이름 | -> [정체 분]
 #
 # 리더가 Monitor 로 건다. stdout 한 줄이 곧 리더를 깨우는 이벤트다.
-#   DONE   완료 파일이 생겼다 → 감시 종료
+#   PROGRESS <줄>  팀원이 <workspace>/progress.log 에 새 줄을 썼다 — 사용자가 진행을 물으면 이것을 인용한다
+#   DONE   완료 파일이 생겼다 → 감시 종료 (완료 파일이 `-` 면 없다 — RED·GREEN 처럼 커밋만 내는 팀원)
 #   STALL  workspace 의 어떤 파일도 N분(기본 10) 동안 안 바뀌었다 → 리더가 팀원에게 메시지를 보낸다
 #   ALIVE  STALL 뒤에 다시 움직였다
+# 확인 간격은 BP_WATCH_INTERVAL 초(기본 60).
 #
 # 🔴 왜 리더 쪽인가 (2026-09-23 실측): 게이트는 기준선을 백그라운드로 돌리고 완료 알림을
 # 세 겹(백그라운드 완료 · until 루프 · Monitor)으로 걸고 턴을 끝냈다 — 기다리는 법은 옳았다.
@@ -25,15 +27,20 @@ if [ ! -d "$ws" ]; then
   echo "workspace 가 없다: $ws" >&2; exit 2
 fi
 
-stalled=0
+interval=${BP_WATCH_INTERVAL:-60}
+stalled=0; last=
 while true; do
-  if [ -f "$ws/$done_file" ]; then echo "DONE $done_file"; exit 0; fi
+  if [ "$done_file" != "-" ] && [ -f "$ws/$done_file" ]; then echo "DONE $done_file"; exit 0; fi
+  if [ -f "$ws/progress.log" ]; then
+    cur=$(tail -n 1 "$ws/progress.log")
+    if [ -n "$cur" ] && [ "$cur" != "$last" ]; then echo "PROGRESS $cur"; last=$cur; fi
+  fi
   # 최근 N분 안에 바뀐 파일이 하나라도 있나
   if [ -n "$(find "$ws" -type f -mmin -"$mins" -print -quit)" ]; then
     if [ "$stalled" -eq 1 ]; then echo "ALIVE $(date '+%H:%M')"; stalled=0; fi
   elif [ "$stalled" -eq 0 ]; then
-    echo "STALL ${mins}분 동안 $ws 변화 없음 · $done_file 없음 ($(date '+%H:%M'))"
+    echo "STALL ${mins}분 동안 $ws 변화 없음 · $done_file 없음 · 마지막 진행: ${last:-없음} ($(date '+%H:%M'))"
     stalled=1
   fi
-  sleep 60
+  sleep "$interval"
 done
