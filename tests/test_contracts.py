@@ -14,7 +14,7 @@ AGENTS = ("bug-root-cause-investigator", "bug-red-writer", "bug-green-engineer",
           "bug-cta-sweeper", "bug-sweep-gate", "bug-light-fixer")
 FORMAL_AGENTS = AGENTS[:5]
 GATE_FILES = {bp_gate.LEDGER, bp_gate.REPRO_MD, bp_gate.REPRO_SH, bp_gate.ROOT_CAUSE, bp_gate.RUBRIC,
-              bp_gate.LIGHT_CAUSE, bp_gate.LIGHT_REPORT, bp_gate.PR_BODY}
+              bp_gate.LIGHT_CAUSE, bp_gate.LIGHT_REPORT, bp_gate.PR_BODY, bp_gate.ENV_JSON}
 AGENT_OUTPUTS = {"investigation.md", "sweep.json", "sweep.md", "gate_round<N>.md", "control/*.diff",
                  "verdict_<n>.json", ".claude/bugfix-pipeline.json", "new_red.txt"}
 # 플러그인에 실제로 있는 파일 이름(스크립트 · 훅 · 문서) — 없는 파일(예: rubric.yaml)을 가리키면 stale 문서다

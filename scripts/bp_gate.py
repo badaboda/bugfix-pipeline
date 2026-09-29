@@ -1,7 +1,7 @@
 """bugfix-pipeline 게이트 — 파이프라인의 상태와 판정을 코드가 집행한다.
 
   python3 scripts/bp_gate.py <명령> <slug> [옵션]
-  init · triage · freeze · baseline · run · refreeze · record-sweep ·
+  init · preflight · triage · freeze · baseline · run · refreeze · record-sweep ·
   promote · to-light · light-verify · light-report · status · serve   ·   --selftest
 
 상태는 <호출 루트>/.bugfix-pipeline/<slug>/ledger.json 한 파일 — 재진입 정본.
@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import platform
 import re
 import shutil
 import signal
@@ -39,6 +40,7 @@ RUBRIC = "rubric.json"
 LIGHT_CAUSE = "light_cause.json"
 LIGHT_REPORT = "light_report.md"
 PR_BODY = "pr_body.md"
+ENV_JSON = "env.json"
 CAP = 3
 TRIAGE_RUNS = 3
 LIGHT_REPRO_RUNS = 5
@@ -176,6 +178,41 @@ def cmd_init(root, a):
     return EXIT_OK
 
 
+def _exit_of(argv, root):
+    try:
+        return subprocess.run(list(argv), cwd=str(root), capture_output=True).returncode
+    except OSError:
+        return ENV_FAILED
+
+
+def _unmet(profile, root, row):
+    """행의 needs 중 지금 이 호스트에서 exit 0 이 아닌 점검 이름 — 모르는 이름도 «없는» 것이다."""
+    by_name = {c.name: c for c in profile.checks}
+    return [n for n in row.get("needs") or [] if n not in by_name or _exit_of(by_name[n].cmd, root) != 0]
+
+
+def cmd_preflight(root, a):
+    """P0 — 이 호스트에서 무엇이 도는지 잰다. 끝낼 수 없는 행을 P5 가 아니라 여기서 안다(원천 S0 실측)."""
+    ws = _ws(root, a.slug)
+    _load(ws)
+    profile = _profile(root)
+    exec_exit = _exit_of(bp_profile.exec_argv(profile, root, ["true"]), root)
+    checks = {c.name: _exit_of(c.cmd, root) for c in profile.checks}
+    env = {"at": _now(), "head": _head(root), "system": platform.system(),
+           "sections": {"exec": profile.exec_cmd is not None, "regress": profile.regress is not None,
+                        "ui": profile.ui is not None},
+           "exec": {"ok": exec_exit == 0, "exit": exec_exit},
+           "checks": {n: {"ok": code == 0, "exit": code} for n, code in checks.items()}}
+    (ws / ENV_JSON).write_text(json.dumps(env, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(f"preflight — {ws / ENV_JSON}")
+    print(f"  exec: {'OK' if exec_exit == 0 else f'실패 exit {exec_exit}'}")
+    for name, code in checks.items():
+        print(f"  {name}: {'OK' if code == 0 else f'없음 exit {code} — 이것을 needs 로 가진 행은 여기서 못 돈다'}")
+    if exec_exit != 0:
+        raise GateError(f"exec 래퍼가 이 호스트에서 명령을 돌리지 못한다(exit {exec_exit}) — 어떤 행도 잴 수 없다")
+    return EXIT_OK
+
+
 PLACEHOLDERS = ("{exec}", "{tree}", "{out}", "{repro}")
 _RUBRIC_KEYS = {"cause_id", "R-CAUSE", "R-SYMPTOM", "R-CONTROL"}
 BASELINE_REF = "@baseline"
@@ -225,10 +262,11 @@ def _validate_rubric(root, ws, rub, problems, allow_url):
         if not isinstance(r, dict):
             problems.append(f"{row} 가 없다")
             continue
-        for k in sorted(set(r) - {"probe", "assert"}):
+        for k in sorted(set(r) - {"probe", "assert", "needs"}):
             problems.append(f"{row} 모르는 키: {k}")
         _argv(r.get("probe"), f"{row}.probe", True, problems, allow_url)
         _argv(r.get("assert"), f"{row}.assert", False, problems, allow_url)
+        _argv(r.get("needs"), f"{row}.needs", False, problems)
         if any(isinstance(t, str) and t.startswith("<expected_after") for t in r.get("assert") or []):
             problems.append(f"{row}.assert 에 expected_after 자리표시가 남았다 — GATE 1 에서 채운 문구로 옮긴다")
     patches = []
@@ -266,6 +304,23 @@ def _validate_rubric(root, ws, rub, problems, allow_url):
     return patches
 
 
+def _needs_problems(root, profile, rub):
+    """행이 요구하는 조건이 지금 이 호스트에 없으면 동결하지 않는다 — P5 에서 ENV 로 끝날 행이다."""
+    known = {c.name for c in profile.checks}
+    problems = []
+    for row in ("R-CAUSE", "R-SYMPTOM"):
+        needs = rub[row].get("needs") or []
+        for n in sorted(set(needs) - known):
+            problems.append(f"{row}.needs 의 {n} 가 프로파일 preflight.checks 에 없다 — 점검을 더하거나 이름을 고친다")
+        missing = [n for n in _unmet(profile, root, rub[row]) if n in known]
+        if missing:
+            problems.append(
+                f"{row} 는 이 호스트에서 못 돈다 — 없는 조건: {', '.join(missing)}. GATE 1 에서 경로를 고른다: "
+                "① 조건이 있는 호스트에서 진행 ② 조건을 갖춘 뒤(시크릿 등) 다시 동결 "
+                "③ 그 조건 없이 도는 probe 로 행을 바꾼다(R-SYMPTOM 이면 «사용자가 본 것»에서 멀어진다 — 기록한다)")
+    return problems
+
+
 def _validate_frozen_set(root, ws, profile):
     problems = []
     rc = _read_json(ws / ROOT_CAUSE, problems)
@@ -285,6 +340,8 @@ def _validate_frozen_set(root, ws, profile):
         problems.append("needs_ui: yes 인데 R-SYMPTOM 에 {url} 이 없다 — sh {repro} {tree} {url} 로 넘긴다")
     if rc is not None and rub is not None and rc.get("cause_id") != rub.get("cause_id"):
         problems.append("root_cause.json 과 rubric.json 의 cause_id 가 다르다")
+    if rub is not None and not problems:
+        problems += _needs_problems(root, profile, rub)
     if problems:
         raise GateError("동결 거부:\n" + "\n".join(f"  - {p}" for p in problems))
     files = [ROOT_CAUSE, RUBRIC, REPRO_MD] + ([REPRO_SH] if (ws / REPRO_SH).is_file() else []) + patches
@@ -598,6 +655,12 @@ def _needs_url(row):
 
 def _run_row(profile, root, ws, row, tree, out):
     """{url} 이 든 행은 «그 트리»로 앱을 띄워 잰다 — 사본은 사본의 코드를 서빙해야 한다."""
+    unmet = _unmet(profile, root, row)
+    if unmet:
+        # 조건 없이 돌면 «돌았는데 FAIL» 로 보여 ANCHOR·CODE 로 오분류된다 — 돌지 못한 것(ENV)이다
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(f"needs 미충족: {', '.join(unmet)}\n")
+        return False, None, {"probe": row["probe"], "needs_unmet": unmet, "out": str(out)}
     if not _needs_url(row):
         return _run_row_at(profile, root, ws, row, tree, out, None)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -1063,6 +1126,8 @@ def _parser():
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("init")
     s.add_argument("slug")
+    s = sub.add_parser("preflight")
+    s.add_argument("slug")
     s = sub.add_parser("status")
     s.add_argument("slug")
     s.add_argument("--close", choices=sorted(_CLOSED))
@@ -1107,7 +1172,7 @@ def _parser():
     return p
 
 
-COMMANDS = {"init": cmd_init, "status": cmd_status, "triage": cmd_triage,
+COMMANDS = {"init": cmd_init, "preflight": cmd_preflight, "status": cmd_status, "triage": cmd_triage,
             "promote": cmd_promote, "to-light": cmd_to_light,
             "freeze": cmd_freeze, "refreeze": cmd_refreeze, "baseline": cmd_baseline,
             "run": cmd_run, "record-sweep": cmd_record_sweep,

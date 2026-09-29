@@ -14,6 +14,7 @@ python3 <플러그인>/scripts/bp_gate.py --selftest
 | 명령 | 트랙 · 단계 | 전제 | 하는 일 |
 |---|---|---|---|
 | `init <slug>` | 공통 P0 | `.bugfix-pipeline/` 가 git 무시 경로 · 진행 중인 다른 slug 없음 | 작업공간 · `ledger.json` · `repro.md` 양식 |
+| `preflight <slug>` | 공통 P0 | 작업공간 있음 | exec 래퍼로 `true` 를 돌려 보고 프로파일 `preflight.checks` 를 재서 `env.json`(HEAD · OS · 섹션 유무 · 점검별 exit). exec 가 못 돌면 2. 몇 번이든 다시 부른다 |
 | `triage <slug> [--light] [--repro-confirmed]` | 공통 P0 | 아직 트리아지 전. `repro.sh` 가 있으면 `--repro-confirmed` 필수 | 재현 3 회 · 스위트 유무 · `--light` → 트랙. 이때의 HEAD 가 `base_sha` |
 | `freeze <slug>` | 정식 GATE 1 | 정식 트랙 · 동결 전 | `rubric.json`·`root_cause.json`·`repro.md` 검사 → 동결 해시 |
 | `refreeze <slug> --reason R [--refund-last]` | 정식 GATE 1 재진입 | 동결 후 | 재동결 · `cause_id` 가 바뀌면 원인 교체 이력 · `--refund-last` 는 직전 `CODE` 환불(사용자 승인) — **동결 파일이 하나 이상 바뀌어야** 하고, `DEFERRED` 에서 cap 아래로 내려가면 단계를 P5 로 되돌린다. 기준선 이후 `cause_id` 가 바뀌면 단계 P2(새 RED) |
@@ -67,6 +68,7 @@ python3 <플러그인>/scripts/bp_gate.py --selftest
 | 파일 | 누가 | 형식 |
 |---|---|---|
 | `repro.md` | P0 · GATE 1 | 한 줄 `키: 값` — `steps:` · `observed:` · `where:` · `needs_ui:` · `url:` · `expected_after:` |
+| `env.json` | P0 `preflight` | 이 호스트에서 무엇이 도는지 — 배정 메시지가 가리키는 환경 인계 파일 |
 | `repro.sh` | P0 (재현 자동화) | `repro.sh <트리> [<URL>]` — `observed` 를 출력으로 드러낸다. `needs_ui: yes` 면 두 번째 인자로 그 트리를 서빙하는 앱의 URL |
 | `root_cause.json` | 조사자 | `cause_id` · `verdict`(`BUG`/`NOT-A-BUG`/`CANNOT-MEASURE`) · `file` · `line` · `fix_scope` |
 | `rubric.json` | 조사자 → GATE 1 | 아래 |
@@ -89,6 +91,9 @@ python3 <플러그인>/scripts/bp_gate.py --selftest
 - 자리표시자: `{exec}` · `{tree}` · `{out}` · `{repro}` · `{url}`. `{url}` 은 프로파일에 `ui` 가 있을 때만 — 그 행을
   잴 때마다 `bp_ui` 가 **그 행의 트리**(원본 또는 사본)로 앱을 띄우고 내린다.
 - `assert` 가 없으면 probe 종료코드 == 0.
+- `needs`(선택, `R-CAUSE` · `R-SYMPTOM`) — 그 행이 요구하는 프로파일 `preflight.checks` 이름. `freeze`·`refreeze` 는 모르는
+  이름이나 **지금 이 호스트에서** exit 0 이 아닌 점검이 있으면 거부한다. `run` 은 행을 잴 때마다 다시 점검해, 없으면
+  probe 를 돌리지 않고 «돌지 못했다»(`ENV`)로 기록한다 — 조건 없이 돈 probe 의 FAIL 이 `ANCHOR`·`CODE` 로 오분류되지 않게.
 - `R-CONTROL` 축은 사본에 변이를 걸고 `R-CAUSE` 를 잰다 — **빨개져야** 통과, `alive` 는 초록이어야 한다.
   `@baseline` 은 «수정 되돌리기»(조사자는 P1 에서 기준선 sha 를 모른다).
 - `R-REGRESS` 는 루브릭에 없다 — 게이트가 `bp_regress` 로 고정 실행한다.

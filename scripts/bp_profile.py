@@ -1,7 +1,7 @@
 """bugfix-pipeline 프로파일 v2 — 호스트 프로젝트가 파이프라인에 주는 값.
 
 사람이 쓰고(.claude/bugfix-pipeline.json) 이 파일이 잰다 — 추정해서 채우지 않는다.
-파일이 없으면 기본값(가벼운 트랙만). 섹션 exec · regress · ui 는 모두 선택이다.
+파일이 없으면 기본값(가벼운 트랙만). 섹션 exec · regress · ui · preflight 는 모두 선택이다.
 
   python3 scripts/bp_profile.py check [호출 루트]
   python3 scripts/bp_profile.py init [호출 루트]
@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -25,10 +26,13 @@ PROFILE_PATH = ".claude/bugfix-pipeline.json"
 SCHEMA = 2
 DRAFT_KEY = "_draft"
 DEFAULT_READY_TIMEOUT_S = 120
-_TOP_KEYS = {"schema", "exec", "regress", "ui"}
+_TOP_KEYS = {"schema", "exec", "regress", "ui", "preflight"}
 _EXEC_KEYS = {"exec_cmd"}
 _REGRESS_KEYS = {"side_cmd", "ran_fully", "not_fully", "tree_marker", "allowed_roots"}
 _UI_KEYS = {"serve_cmd", "ready_marker", "ready_timeout_s"}
+_PREFLIGHT_KEYS = {"checks"}
+_CHECK_KEYS = {"name", "cmd"}
+_CHECK_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 
 
 class ProfileError(Exception):
@@ -56,12 +60,20 @@ class Ui:
 
 
 @dataclass(frozen=True)
+class Check:
+    """이 호스트에 있어야 하는 조건 하나(키 · 스택 · 도구) — cmd 가 exit 0 이면 있다."""
+    name: str
+    cmd: Tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class Profile:
     root: Path
     from_file: bool
     exec_cmd: Optional[Tuple[str, ...]]
     regress: Optional[Regress]
     ui: Optional[Ui]
+    checks: Tuple[Check, ...] = ()
 
 
 def _unknown(d, allowed, prefix):
@@ -191,6 +203,32 @@ def _load_ui(root, data, problems):
     return Ui(serve_cmd, ready_marker, timeout)
 
 
+def _load_preflight(root, data, problems):
+    sec = _section(data, "preflight", _PREFLIGHT_KEYS, problems)
+    if sec is None:
+        return ()
+    items = sec.get("checks")
+    if not isinstance(items, list) or not items:
+        problems.append("preflight.checks 가 비어 있다 — 점검이 없으면 섹션을 뺀다")
+        return ()
+    checks, seen = [], set()
+    for i, item in enumerate(items):
+        name = f"preflight.checks[{i}]"
+        if not isinstance(item, dict):
+            problems.append(f"{name} 는 객체여야 한다")
+            continue
+        problems += _unknown(item, _CHECK_KEYS, f"{name}.")
+        cname = item.get("name")
+        if not isinstance(cname, str) or not _CHECK_NAME.match(cname):
+            problems.append(f"{name}.name 은 소문자·숫자·- 여야 한다: {cname!r}")
+            continue
+        if cname in seen:
+            problems.append(f"{name}.name 이 겹친다: {cname}")
+        seen.add(cname)
+        checks.append(Check(cname, _cmd(root, item.get("cmd"), f"{name}.cmd", problems)))
+    return tuple(checks)
+
+
 def load(root) -> Profile:
     root = Path(root).resolve()
     path = root / PROFILE_PATH
@@ -214,9 +252,10 @@ def load(root) -> Profile:
     exec_cmd = _load_exec(root, data, problems)
     regress = _load_regress(root, data, problems)
     ui = _load_ui(root, data, problems)
+    checks = _load_preflight(root, data, problems)
     if problems:
         raise ProfileError(problems)
-    return Profile(root, True, exec_cmd, regress, ui)
+    return Profile(root, True, exec_cmd, regress, ui, checks)
 
 
 def exec_argv(profile, tree, cmd) -> list:
@@ -321,6 +360,7 @@ def _check(argv) -> int:
     else:
         print("  regress=없음 (정식 트랙 불가)")
     print(f"  ui={'serve_cmd=' + str(list(p.ui.serve_cmd)) if p.ui else '없음 (P5b 생략)'}")
+    print(f"  preflight={[c.name for c in p.checks] or '없음'}")
     return 0
 
 
@@ -348,6 +388,8 @@ _SELFTEST_CASES = [
     ("exec_cmd 없음", {"exec.x": 1}, "exec.exec_cmd"),
     ("ui 정상", {"ui.serve_cmd": ["sh"], "ui.ready_marker": "^BP_URL="}, None),
     ("ui 타임아웃 0", {"ui.serve_cmd": ["sh"], "ui.ready_marker": "^U", "ui.ready_timeout_s": 0}, "ready_timeout_s"),
+    ("preflight 정상", {"preflight.checks": [{"name": "k", "cmd": ["sh"]}]}, None),
+    ("preflight cmd 없음", {"preflight.checks": [{"name": "k"}]}, "preflight.checks[0].cmd"),
 ]
 
 

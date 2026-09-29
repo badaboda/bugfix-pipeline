@@ -22,9 +22,10 @@ description: "버그 수정 요청 하나를 원인 규명 → 수정 → 결정
 ## 1. P0 — 접수 · 트리아지 (두 트랙 공통)
 
 1. **재현 동결** — 사용자가 본 것을 `bp_gate.py init <slug>` 가 만든 `repro.md` 에 적는다: `steps` · `observed`(출력에 그대로 나올 문구) · `where` · `needs_ui`(앱 화면이 필요하면 `yes`) · `url`(프로파일에 `ui` 가 없을 때 사용자 개발 서버). `expected_after` 는 **비운다.**
-2. **재현 자동화** — `steps` 를 `repro.sh` 로 옮긴다(**`steps` 가 이미 명령이어도** 감싼다 — 게이트는 `repro.sh` 만 잰다. 없으면 트리아지가 비결정 → 가벼운 트랙): `repro.sh <트리> [<URL>]`, `observed` 를 **출력으로 드러낸다.** 한 번 돌린 출력을 사용자에게 보이고 **「이게 내가 본 것」 확인**을 받는다 — 🛑 하드 스톱. 화면 재현(`needs_ui: yes`)이고 프로파일에 `ui` 가 있으면 `bp_gate.py serve <slug> --side after` 를 백그라운드로 띄워 그 `BP_URL` 로 한 번 돌리고 SIGTERM 으로 내린다(`ui` 가 없으면 `url:` 의 사용자 서버). 옮길 수 없으면(외부 결제 · 실기기 · 운영 데이터 전용) 사유를 `repro.md` 에 적는다.
-3. `bp_gate.py triage <slug> [--repro-confirmed] [--light]` — 재현 3 회 · 스위트 유무 · 사용자가 「가볍게」를 말했는지로 트랙을 **잰다.** 결정적 + 스위트 + 가볍게 아님 → 정식, 그 밖 → 가벼운. 결과는 `ledger.json`.
-4. (선택) `$PLUGIN/hooks/install.sh install` — `RED:` 규칙을 더 일찍 알려 주는 git 훅. 거부되면 경고만 — 집행은 게이트의 커밋 감사다.
+2. **사전 점검** — `bp_gate.py preflight <slug>` 가 이 호스트에서 exec 래퍼가 도는지와 프로파일 `preflight.checks`(키 · 스택 · 도구)를 재서 `env.json` 에 쓴다. exit 2 면 어떤 행도 못 잰다 — 멈추고 보고. «없음»으로 나온 조건은 **지금** 사용자에게 보인다 — 그 조건이 필요한 행은 GATE 1 에서 동결되지 않는다(끝낼 수 없다는 것을 P5 에서 알지 않게). 이후 모든 배정 메시지에 `env.json` 경로를 넣는다 — 에이전트가 환경을 다시 조사하지 않게.
+3. **재현 자동화** — `steps` 를 `repro.sh` 로 옮긴다(**`steps` 가 이미 명령이어도** 감싼다 — 게이트는 `repro.sh` 만 잰다. 없으면 트리아지가 비결정 → 가벼운 트랙): `repro.sh <트리> [<URL>]`, `observed` 를 **출력으로 드러낸다.** 한 번 돌린 출력을 사용자에게 보이고 **「이게 내가 본 것」 확인**을 받는다 — 🛑 하드 스톱. 화면 재현(`needs_ui: yes`)이고 프로파일에 `ui` 가 있으면 `bp_gate.py serve <slug> --side after` 를 백그라운드로 띄워 그 `BP_URL` 로 한 번 돌리고 SIGTERM 으로 내린다(`ui` 가 없으면 `url:` 의 사용자 서버). 옮길 수 없으면(외부 결제 · 실기기 · 운영 데이터 전용) 사유를 `repro.md` 에 적는다.
+4. `bp_gate.py triage <slug> [--repro-confirmed] [--light]` — 재현 3 회 · 스위트 유무 · 사용자가 「가볍게」를 말했는지로 트랙을 **잰다.** 결정적 + 스위트 + 가볍게 아님 → 정식, 그 밖 → 가벼운. 결과는 `ledger.json`.
+5. (선택) `$PLUGIN/hooks/install.sh install` — `RED:` 규칙을 더 일찍 알려 주는 git 훅. 거부되면 경고만 — 집행은 게이트의 커밋 감사다.
 
 재진입: 언제든 `bp_gate.py status <slug>` 로 트랙 · 단계 · 루프 N/3 을 읽는다. 정본은 `ledger.json` 한 파일이다.
 
@@ -33,7 +34,7 @@ description: "버그 수정 요청 하나를 원인 규명 → 수정 → 결정
 | 단계 | 누가 | 무엇 | 다음 |
 |---|---|---|---|
 | P1 조사 | `bugfix-pipeline:bug-root-cause-investigator` | `root_cause.json` · `rubric.json` 초안 · `control/*.diff` · `investigation.md` | GATE 1 |
-| GATE 1 | 🛑 사용자 | 진단 · `fix_scope` · `expected_after` 채우기 · 루브릭 확정. 리더는 사용자가 채운 `expected_after` 문구를 `rubric.json` 의 `R-SYMPTOM.assert` 자리에 옮긴다(조사자는 자리표시만 남긴다 — 그대로 동결하면 매번 FAIL) | `bp_gate.py freeze <slug>` |
+| GATE 1 | 🛑 사용자 | 진단 · `fix_scope` · `expected_after` 채우기 · 루브릭 확정. 리더는 사용자가 채운 `expected_after` 문구를 `rubric.json` 의 `R-SYMPTOM.assert` 자리에 옮긴다(조사자는 자리표시만 남긴다 — 그대로 동결하면 매번 FAIL). 행의 `needs` 가 이 호스트에 없으면 `freeze` 가 거부한다 — 사용자가 ① 조건이 있는 호스트에서 진행 ② 조건을 갖춘 뒤 다시 동결 ③ 그 조건 없는 probe 로 행 교체(R-SYMPTOM 이면 의미가 약해진다는 것을 기록) 중 고른다 | `bp_gate.py freeze <slug>` |
 | P2 RED | `bugfix-pipeline:bug-red-writer` | 실패 테스트 커밋 · sha · RED 파일 · RED 실행 명령 보고 | `bp_gate.py baseline <slug> --red <파일…>` |
 | P3 GREEN | `bugfix-pipeline:bug-green-engineer` (배정에 RED sha · RED 실행 명령) | `fix_scope` 안 최소 수정 · 커밋 본문 `RED: <sha>` | P4 |
 | P4 자기확인 | 같은 구현자 | RED 통과 — 보고일 뿐. 회귀는 `run` 의 `R-REGRESS` 가 기준선 사본으로 잰다 | P5 |
