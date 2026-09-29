@@ -57,6 +57,7 @@ description: "버그 수정 요청 하나를 원인 규명 → 수정 → 결정
   측정 결함으로 직전 `CODE` 를 돌려받으려면 사용자 승인 후 `bp_gate.py refreeze <slug> --reason "<사유>" --refund-last` — 동결 파일이 하나 이상 **실제로 바뀌어야** 하고, `DEFERRED` 에서 cap 아래로 내려가면 P5 로 돌아온다.
 - **정식 → 가벼운 이관** (사용자 승인): 조사 판정 `CANNOT-MEASURE` · `VOID`/`ENV` 연속 2 회 · GATE 1 에서 크기 강등 → `bp_gate.py to-light <slug> --kind cannot-measure|unstable|size --reason "<사유>"`.
 - `NOT-A-BUG` 는 사용자가 `fix_scope` 를 승인하면 P2(표현·안내 결함), 아니면 종료.
+- **다른 머신으로 옮길 때**(일회성 클라우드 세션 · 한 행만 다른 호스트에서 재측정): `freeze` 뒤마다 `bp_gate.py bundle <slug>` → `.bugfix-pipeline/<slug>-bundle.tar.gz`(원문 출력 · 캐시 제외). 일회성 세션이면 그 경로를 사용자에게 알린다 — 세션이 끝나면 작업공간이 사라진다. 받는 쪽은 같은 가지를 받아(HEAD 가 원격에 있어야 한다 — push 는 사용자 승인 후) `.bugfix-pipeline/` 아래에 풀고 `status` 로 단계를 읽은 뒤 이어 간다(`preflight` 를 다시 — 호스트가 바뀌었다). 번들이 없으면 다른 머신은 P1 부터다.
 
 ## 3. 가벼운 트랙
 

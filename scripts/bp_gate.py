@@ -2,7 +2,7 @@
 
   python3 scripts/bp_gate.py <명령> <slug> [옵션]
   init · preflight · triage · freeze · baseline · run · refreeze · record-sweep ·
-  promote · to-light · light-verify · light-report · status · serve   ·   --selftest
+  promote · to-light · light-verify · light-report · status · serve · bundle   ·   --selftest
 
 상태는 <호출 루트>/.bugfix-pipeline/<slug>/ledger.json 한 파일 — 재진입 정본.
 종료코드: 0 성공(run 은 PASS) · 1 run 판정이 PASS 아님 · 2 설정 오류·변조·감사 실패 · 4 cap 도달
@@ -19,6 +19,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 from contextlib import ExitStack, contextmanager
@@ -1106,6 +1107,28 @@ def cmd_serve(root, a):
             signal.signal(s, h)
 
 
+# 번들에서 뺀다 — 원문 출력(토큰 · .env 값이 섞일 수 있다)과 머신마다 다시 만드는 캐시
+_BUNDLE_SKIP = {"control_cache.json", "baseline_cache", "serve", LIGHT_REPORT}
+_RAW_DIR = re.compile(r"^(run|light)_\d+$")
+
+
+def cmd_bundle(root, a):
+    """작업공간을 tar.gz 로 — 다른 머신의 같은 커밋 위에 풀면 동결·기준선·이력 그대로 이어 간다."""
+    ws = _ws(root, a.slug)
+    _load(ws)
+    dest = ws.parent / f"{a.slug}-bundle.tar.gz"
+    with tarfile.open(dest, "w:gz") as tar:
+        for p in sorted(ws.iterdir()):
+            if p.name not in _BUNDLE_SKIP and not _RAW_DIR.match(p.name):
+                tar.add(p, arcname=f"{a.slug}/{p.name}")
+    head = _head(root)
+    print(f"bundle — {dest}")
+    print(f"  재개: 다른 머신에서 HEAD {head[:7]} 를 받아 {WORKSPACE_DIR}/ 아래에 풀고 status {a.slug}")
+    if not _git(root, "branch", "-r", "--contains", head).stdout.strip():
+        print("  경고: HEAD 가 어떤 원격 가지에도 없다 — 다른 머신은 기준선 · RED 커밋을 못 찾는다(push 는 사용자 승인 후)")
+    return EXIT_OK
+
+
 def _formal_pr_body(root, ws, led, t):
     rc = json.loads((ws / ROOT_CAUSE).read_text()) if (ws / ROOT_CAUSE).is_file() else {}
     judged = [h for h in led["history"] if h.get("kind") in ("run", "sweep")]
@@ -1162,6 +1185,8 @@ def _parser():
     s.add_argument("slug")
     s = sub.add_parser("preflight")
     s.add_argument("slug")
+    s = sub.add_parser("bundle")
+    s.add_argument("slug")
     s = sub.add_parser("status")
     s.add_argument("slug")
     s.add_argument("--close", choices=sorted(_CLOSED))
@@ -1210,7 +1235,8 @@ COMMANDS = {"init": cmd_init, "preflight": cmd_preflight, "status": cmd_status, 
             "promote": cmd_promote, "to-light": cmd_to_light,
             "freeze": cmd_freeze, "refreeze": cmd_refreeze, "baseline": cmd_baseline,
             "run": cmd_run, "record-sweep": cmd_record_sweep,
-            "light-verify": cmd_light_verify, "light-report": cmd_light_report, "serve": cmd_serve}
+            "light-verify": cmd_light_verify, "light-report": cmd_light_report, "serve": cmd_serve,
+            "bundle": cmd_bundle}
 
 
 def _selftest() -> int:
