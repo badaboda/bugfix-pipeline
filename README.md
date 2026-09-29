@@ -75,16 +75,16 @@ hooks/install.sh uninstall   # 제거 (작업 가지 한정이므로 끝나면 �
 | `scripts/bugfix_verdict.py` (+ `--selftest`) | ✅ 이식 완료 · 호스트 실행 확인 · 양방향 양성 대조 확인 |
 | `tests/test_bugfix_verdict.py` | ✅ 이식 (pytest, 개발용) |
 | `hooks/commit-msg` · `hooks/install.sh` | ✅ 원천 최신과 동기화 · 가지 한정·연결 워크트리 install 을 실제 `git commit` 으로 실측 (수정 전 판에서 빨강 대조) |
-| `scripts/regress.sh` (`diff` + `selftest`) | ✅ R-REGRESS **판정부만** — 「전수가 돌았다」 문구는 `BP_RAN_FULLY`·`BP_NOT_FULLY` 로 주입(없으면 exit 3). selftest 다섯 축 · 사보타주 2종 대조. ❌ 실행부(두 쪽을 한 명령·같은 조건·순차로)는 프로파일 대기 |
+| `scripts/regress.sh` (`diff` + `selftest`) | ✅ R-REGRESS **판정부** — 「전수가 돌았다」 문구는 `BP_RAN_FULLY`·`BP_NOT_FULLY` 로 주입(없으면 exit 3). 호출 오류 exit 2 선언(2026-09-29). selftest 여덟 축 · 사보타주 대조. 실행부는 `bp_regress.py` |
 | `scripts/bp_profile.py` · `scripts/bp_regress.py` · `scripts/bp_exec_local.py` | ✅ 프로파일 v2(schema 2 — 파일·섹션 모두 선택) · `init` 초안 · `exec` 기본값 + R-REGRESS 실행부 — [`docs/profile.md`](docs/profile.md). 설치처 `--selftest` 둘 · 양성 대조 |
 | `templates/` | ✅ pytest · vitest 래퍼 — 루트·`git worktree` 사본에서 실측. ❌ go(측정 환경 없음) |
 | `scripts/bp_ui.py` | ✅ 화면 서버 — `ui.serve_cmd` 로 주어진 트리를 띄워 URL · 프로세스 그룹 종료. 게이트의 `{url}` 행과 화면 재현(`needs_ui`)이 쓴다. 설치처 `--selftest` |
-| `scripts/bp_gate.py` | ✅ 게이트 — 명령 13종(트리아지 · 동결 · 커밋 감사 · 판정 · cap · 캐시 · 가벼운 트랙 검증·표지 · PR 본문) — [`docs/gate.md`](docs/gate.md). 설치처 `--selftest` |
-| `scripts/watch.sh` | ✅ 원천 그대로 · 인자 오류·DONE 경로만 여기서 확인 (STALL·ALIVE 는 원천 실발화 근거) |
+| `scripts/bp_gate.py` | ✅ 게이트 — 명령 15종(사전 점검 · 트리아지 · 동결 · 커밋 감사 · 판정 · cap · 캐시 · 가벼운 트랙 검증·표지 · PR 본문 · 번들) — [`docs/gate.md`](docs/gate.md). 설치처 `--selftest`. 2026-09-29 원천 회고 반영: `preflight`·행 `needs`(조건 없이 돈 FAIL 을 ENV 로 — 가드를 끄면 ANCHOR 로 새는 것을 대조) · `flag_matrix` · `bundle`(다른 클론에서 PASS 까지 왕복). ❌ 실제 클라우드 세션에서는 아직 안 돌렸다 |
+| `scripts/watch.sh` | ✅ `progress.log` → `PROGRESS` 이벤트 · 완료 파일 `-` · STALL 에 마지막 진행 — PROGRESS·DONE·STALL 을 pytest 로 확인(2026-09-29). ALIVE 는 원천 실발화 근거 |
 | `skills/bugfix-pipeline/SKILL.md` | ✅ 트리아지 · 정식/가벼운 트랙 · P5b · P6 를 `bp_gate.py` 명령과 멈춤 조건으로. 적재 확인(2026-09-25, Claude Code 2.1.282, `--plugin-dir`): `init` 에 스킬 `bugfix-pipeline:bugfix-pipeline` + 에이전트 6. 종단 2회 — [1회차](docs/e2e/2026-09-25-humanize.md)(pytest 공개 OSS · 정식 실제 버그 PASS · 가벼운 심은 회귀) · [2회차](docs/e2e/2026-09-28-vitest-ui.md)(vitest 공개 OSS 실제 버그 PASS · 화면 재현 + P5b 스윕 첫 실행). ⚠️ 사람 게이트는 리더가 대신 통과 |
 | `agents/` 6종 | ✅ 조사자(탈-프로젝트화 · `rubric.json`) · RED 작성자 · GREEN 구현자 · CTA 스위퍼 · 스윕 게이트 · 가벼운 수정자 — 배정 계약 한 모양(`workspace` · `tree` · `cause_id`) |
 | `tests/test_contracts.py` | ✅ 계약 린트 — 문서의 명령 · 파일명 · 표지 · 에이전트 이름 · 두 언어 트리거 · 원천 결합어를 `bp_gate` 상수와 대조. 사보타주 5축 대조 |
-| 프로파일 | ✅ v2 (사람이 쓰고 검사기가 잰다 · 없으면 가벼운 트랙만) · `init` 은 신호 하나일 때 «검사를 통과하지 못하는» 초안만 — 추정하지 않는다 |
+| 프로파일 | ✅ v2 (사람이 쓰고 검사기가 잰다 · 없으면 가벼운 트랙만) · `init` 은 신호 하나일 때 «검사를 통과하지 못하는» 초안만 — 추정하지 않는다. 선택 섹션 `preflight.checks`(호스트 조건 점검) |
 
 ## 남은 설계 결정
 
@@ -106,6 +106,14 @@ claude plugin install bugfix-pipeline@bugfix-pipeline-marketplace
 ```
 
 세 경로 모두 2026-09-24(Claude Code 2.1.281)에 세션 `init` 의 에이전트 목록으로 적재를 확인했다(당시 에이전트 하나). 스킬과 에이전트 6종의 적재는 아래 「현재 상태」의 확인 기록을 본다.
+
+### 권한
+
+이 플러그인은 권한 규칙을 싣지 않는다 — 허용 범위는 설치한 프로젝트가 정한다. 파이프라인이 반드시 하는 일은
+플러그인 스크립트 실행(`bp_gate.py` · `watch.sh`), 프로파일 래퍼 실행, 레포 «밖» 임시 사본(`git worktree add --detach`)
+생성·폐기, 조사자의 작업공간 안 계측 사본 편집이다. 원천 실행에서 사본 변이 실험과 환경 변수를 바꾼 재시도가 거부돼
+미확인으로 남았다. 첫 실행 뒤 `/fewer-permission-prompts` 로 그 세션의 거부 목록에서 프로젝트 허용 목록을 만드는 것을
+권한다. 거부로 건너뛴 확인은 GATE 에 «못 잰 것»으로 올라간다(SKILL §6).
 
 ## 플러그인 레이아웃 근거
 

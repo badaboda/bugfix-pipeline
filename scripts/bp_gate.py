@@ -1250,12 +1250,17 @@ def _selftest() -> int:
 
     with tempfile.TemporaryDirectory() as tmp:
         root, ws = fx.formal_ready(Path(tmp) / "a")
+        expect("preflight", fx.gate(root, "preflight", "b1"), 0)
+        expect("env.json", (ws / ENV_JSON).is_file(), True)
         expect("freeze", fx.gate(root, "freeze", "b1"), 0)
         red = fx.red_commit(root)
         expect("baseline", fx.gate(root, "baseline", "b1", "--red", "tests/red.sh"), 0)
         expect("수정 전 run = CODE", fx.gate(root, "run", "b1"), 1)
         fx.fix_commit(root, red)
         expect("수정 후 run = PASS", fx.gate(root, "run", "b1"), 0)
+        expect("bundle", fx.gate(root, "bundle", "b1"), 0)
+        with tarfile.open(ws.parent / "b1-bundle.tar.gz") as t:
+            expect("번들에 원문 출력 없음", [n for n in t.getnames() if n.startswith("b1/run_")], [])
         (ws / "rubric.json").write_text((ws / "rubric.json").read_text() + " ")
         expect("변조 = 2", fx.gate(root, "run", "b1"), 2)
     with tempfile.TemporaryDirectory() as tmp:
@@ -1269,7 +1274,7 @@ def _selftest() -> int:
         for f in failures:
             print(f"  - {f}")
         return 1
-    print("selftest OK — 정식 한 바퀴(CODE→PASS) · 변조 · 가벼운 트랙 표지")
+    print("selftest OK — 사전 점검 · 정식 한 바퀴(CODE→PASS) · 번들 · 변조 · 가벼운 트랙 표지")
     return 0
 
 
