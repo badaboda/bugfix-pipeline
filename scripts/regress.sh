@@ -10,8 +10,8 @@
 #   BP_RAN_FULLY  로그에 «있어야» 하는 grep -E 패턴 (필수 — 없으면 측정 무효)
 #   BP_NOT_FULLY  로그에 «있으면 안 되는» grep -E 패턴 (선택)
 #
-# 종료코드: 0 = 새 빨강 0 · 1 = 새 빨강 있음 · 3 = 측정 무효(한쪽이 «안 돌았다»)
-# ⇒ 루브릭: assert `exit == 0`. exit 3 은 FAIL 이 아니라 probe_ok=False 다.
+# 종료코드: 0 = 새 빨강 0 · 1 = 새 빨강 있음 · 2 = 호출 오류(인자·하위 명령 — 측정 전) · 3 = 측정 무효(한쪽이 «안 돌았다»)
+# ⇒ 루브릭: assert `exit == 0`. exit 2·3 은 FAIL 이 아니라 probe_ok=False 다.
 #
 # 실행부(두 쪽을 «한 명령»·«같은 조건»·«순차»로 돌리기)는 프로파일에 달려 있어 아직 없다.
 set -e
@@ -127,10 +127,17 @@ case "$1" in
     BP_NOT_FULLY='('
     _expect 3 "읽을 수 없는 not_fully" "$t/base.txt" "$t/same.txt" "$t/ok.log" "$t/ok.log"
     BP_NOT_FULLY=$saved
+    # 축 8: 호출 오류는 선언된 exit 2 — 판정 코드(0·1·3)와 섞이지 않는다
+    for bad in "diff a b" "bogus"; do
+      set +e; sh "$0" $bad >/dev/null 2>&1; got=$?; set -e
+      if [ "$got" -ne 2 ]; then
+        echo "FAIL: 호출 오류($bad) — 기대 exit 2, 실제 $got" >&2; fail=1
+      fi
+    done
 
     rm -rf "$t"
     [ "$fail" -eq 0 ] || exit 1
-    echo "selftest OK — 일곱 축(열두 사례) 전부 통과"
+    echo "selftest OK — 여덟 축(열네 사례) 전부 통과"
     ;;
   *)
     echo "사용법: $0 diff <기준선 이름> <수정 후 이름> <기준선 로그> <수정 후 로그> <새 빨강 출력> | selftest" >&2
