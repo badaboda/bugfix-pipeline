@@ -37,7 +37,7 @@ description: "버그 수정 요청 하나를 원인 규명 → 수정 → 결정
 | GATE 1 | 🛑 사용자 | 진단 · `fix_scope` · `expected_after` 채우기 · 루브릭 확정. 리더는 사용자가 채운 `expected_after` 문구를 `rubric.json` 의 `R-SYMPTOM.assert` 자리에 옮긴다(조사자는 자리표시만 남긴다 — 그대로 동결하면 매번 FAIL). 행의 `needs` 가 이 호스트에 없으면 `freeze` 가 거부한다 — 사용자가 ① 조건이 있는 호스트에서 진행 ② 조건을 갖춘 뒤 다시 동결 ③ 그 조건 없는 probe 로 행 교체(R-SYMPTOM 이면 의미가 약해진다는 것을 기록) 중 고른다. 원인 코드가 기능 플래그 뒤에 있으면 `flag_matrix`(회귀를 잴 플래그 조건)도 여기서 확정한다 — P3 에서 늘리지 않는다 | `bp_gate.py freeze <slug>` |
 | P2 RED | `bugfix-pipeline:bug-red-writer` | 실패 테스트 커밋 · sha · RED 파일 · RED 실행 명령 보고 | `bp_gate.py baseline <slug> --red <파일…>` |
 | P3 GREEN | `bugfix-pipeline:bug-green-engineer` (배정에 RED sha · RED 실행 명령) | `fix_scope` 안 최소 수정 · 커밋 본문 `RED: <sha>` | P4 |
-| P4 자기확인 | 같은 구현자 | RED 통과 — 보고일 뿐. 회귀는 `run` 의 `R-REGRESS` 가 기준선 사본으로 잰다 | P5 |
+| P4 자기확인 | 같은 구현자 | RED 통과 + 빠른 부분 실행(`fix_scope` 근처) — 보고일 뿐. 전체 스위트는 돌리지 않는다 — 회귀는 `run` 의 `R-REGRESS` 가 기준선 사본으로 전수 잰다 | P5 |
 | P5 판정 | 게이트 | `bp_gate.py run <slug>` | 아래 표 |
 | P5b 스윕 | §4 | 관련 범위 화면 | GATE 2 |
 | GATE 2 | 🛑 사용자 | 재현 재생 · 카드 밖 파일 · 루프 N/3 · 원인 교체 이력 · 부채(미룬 것 · 우회) · 관찰(미판정) · P5b 생략 사유 | P6 |
@@ -117,7 +117,7 @@ description: "버그 수정 요청 하나를 원인 규명 → 수정 → 결정
 - 채점자는 코드다(`bp_gate.py run` · `light-verify` · `light-report`) — LLM 이 아니다.
 - 루브릭 작성자(조사자) ≠ 채점자. `expected_after` 는 사용자가 채운다.
 - 귀속은 진리표가 낸다. cap 은 `CODE` 만 센다(3).
-- 표본은 전수다. 루프백은 같은 `cause_id` 안에서만 — 원인이 바뀌면 GATE 1 로.
+- **판정의** 표본은 전수다(부분이 초록이어도 옆의 회귀는 안 보인다). P4 자기 확인은 부분이어도 된다 — 판정이 아니므로. 루프백은 같은 `cause_id` 안에서만 — 원인이 바뀌면 GATE 1 로.
 - 같은 우회를 두 번째 쓰면 그건 결함이다 — 보고한다.
 - 가벼운 트랙의 검증과 표지는 코드가 낸다 — 에이전트 보고가 아니다.
 

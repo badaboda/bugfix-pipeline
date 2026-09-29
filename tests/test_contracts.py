@@ -111,6 +111,14 @@ def test_every_agent_writes_the_progress_log_that_watch_reads(agent):
     assert "`progress.log`" in text and "5분" in text, f"{agent}: 진행 기록 계약이 없다"
 
 
+def test_green_self_check_is_partial_and_leaves_the_full_suite_to_the_verdict():
+    # 원천 실측: 구현자가 전체 스위트를 플래그 조건별로 4회 돌렸다(≈20분). 판정의 표본은 전수, 자기 확인은 부분
+    p4 = _text(REPO / "agents" / "bug-green-engineer.md").split("## P4", 1)[1].split("\n## ", 1)[0]
+    assert "부분" in p4 and "판정 아님" in p4
+    assert "전체 스위트" in p4 and "돌리지 않는다" in p4
+    assert "**판정의** 표본은 전수다" in _text(SKILL)
+
+
 def test_producers_name_their_outputs():
     need = {"bug-root-cause-investigator": (bp_gate.ROOT_CAUSE, bp_gate.RUBRIC, "investigation.md"),
             "bug-light-fixer": (bp_gate.LIGHT_CAUSE,),
