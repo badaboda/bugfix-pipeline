@@ -61,7 +61,7 @@ python3 <플러그인>/scripts/bp_gate.py --selftest
 | 캐시 | 키 | 무효 |
 |---|---|---|
 | `control_cache.json` | HEAD · 동결 집합 전체 해시(patch · `repro.sh` 포함) · 기준선 sha · `exec` 해시(래퍼 또는 `bp_exec_local.py` 내용) · `ui` 해시(설정 + `serve_cmd` 래퍼 내용) | 새 커밋 · 재동결 · 래퍼 변경 |
-| `baseline_cache/<sha>/` | 기준선 sha · `regress` 해시(설정 + `side_cmd` 래퍼 내용) | 프로파일 `regress` 나 래퍼 변경. **기준선 쪽이 전수로 돈 실행만** 저장한다 |
+| `baseline_cache/<sha>/` (`flag_matrix` 가 있으면 조건마다 `…/flags-<해시>/`) | 기준선 sha · `regress` 해시(설정 + `side_cmd` 래퍼 내용) · 플래그 조건 | 프로파일 `regress` 나 래퍼 변경. **기준선 쪽이 전수로 돈 실행만** 저장한다 |
 
 ## 작업공간 파일
 
@@ -97,6 +97,11 @@ python3 <플러그인>/scripts/bp_gate.py --selftest
 - `R-CONTROL` 축은 사본에 변이를 걸고 `R-CAUSE` 를 잰다 — **빨개져야** 통과, `alive` 는 초록이어야 한다.
   `@baseline` 은 «수정 되돌리기»(조사자는 P1 에서 기준선 sha 를 모른다).
 - `R-REGRESS` 는 루브릭에 없다 — 게이트가 `bp_regress` 로 고정 실행한다.
+- `flag_matrix`(선택, 최상위) — `[{"FLAG": "0"}, {"FLAG": "1"}]` 처럼 환경 변수 조건의 배열. `R-REGRESS` 를 조건마다
+  한 번씩(두 쪽에 같은 값을 얹어) 재고, 하나라도 새 빨강이면 FAIL. 출력은 `run_<n>/regress_<i>/`. 원인 코드가 플래그
+  뒤에 있으면 GATE 1 에서 동결한다 — 구현자가 P3 에서 재량으로 조건을 더하지 않게(원천 실측). «끔»도 값을 명시한다
+  (`{}` 는 호출자 셸의 값을 물려받는다).
+- 회귀의 «선택 규칙»(일부 테스트만)은 두지 않는다 — 표본은 전수다. 반복 비용은 기준선 캐시가 줄인다(아래).
 
 ## 가벼운 트랙 표지
 

@@ -119,7 +119,7 @@ def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S")
 
 
-def _run_side(reg, side, tree, out, meta, checked_head, root) -> None:
+def _run_side(reg, side, tree, out, meta, checked_head, root, env=None) -> None:
     names, log = out / f"{side}_names.txt", out / f"{side}.log"
     before = _head(tree)
     if before != checked_head:
@@ -134,6 +134,7 @@ def _run_side(reg, side, tree, out, meta, checked_head, root) -> None:
             subprocess.run(
                 [*reg.side_cmd, str(tree), str(names)],
                 cwd=str(root), stdout=f, stderr=subprocess.STDOUT,
+                env={**os.environ, **env} if env else None,
             )
         except OSError as e:
             raise _Stop(EXIT_CONFIG, f"설정 오류: side_cmd 를 실행할 수 없다 — {e}")
@@ -157,9 +158,10 @@ def _judge(reg, out) -> int:
     return r.returncode
 
 
-def run(base, after, out, root=None, base_cache=None) -> int:
+def run(base, after, out, root=None, base_cache=None, env=None) -> int:
+    """env: 두 쪽에 «똑같이» 얹는 환경 변수(플래그 조건). 조건마다 base_cache 를 따로 준다."""
     out = Path(out).resolve()
-    meta = {}
+    meta = {"flags": " ".join(f"{k}={v}" for k, v in sorted(env.items()))} if env else {}
     code = EXIT_VOID
     try:
         try:
@@ -191,8 +193,8 @@ def run(base, after, out, root=None, base_cache=None) -> int:
             meta.update({k: v for k, v in cached.items() if k.startswith("base_")})
             meta["base_cached"] = "1"
         else:
-            _run_side(reg, "base", base, out, meta, base_head, profile.root)
-        _run_side(reg, "after", after, out, meta, after_head, profile.root)  # 곧바로 — 사이에 아무것도 기다리지 않는다
+            _run_side(reg, "base", base, out, meta, base_head, profile.root, env)
+        _run_side(reg, "after", after, out, meta, after_head, profile.root, env)  # 곧바로 — 사이에 아무것도 기다리지 않는다
         code = _judge(reg, out)
         if cache and not cached and _base_ran_fully(reg, out):
             # 판정 «뒤», 기준선 쪽이 전수로 돈 것이 확인됐을 때만 — 무효한 기준선을 영구히 재사용하지 않게

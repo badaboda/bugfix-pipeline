@@ -34,7 +34,7 @@ description: "버그 수정 요청 하나를 원인 규명 → 수정 → 결정
 | 단계 | 누가 | 무엇 | 다음 |
 |---|---|---|---|
 | P1 조사 | `bugfix-pipeline:bug-root-cause-investigator` | `root_cause.json` · `rubric.json` 초안 · `control/*.diff` · `investigation.md` | GATE 1 |
-| GATE 1 | 🛑 사용자 | 진단 · `fix_scope` · `expected_after` 채우기 · 루브릭 확정. 리더는 사용자가 채운 `expected_after` 문구를 `rubric.json` 의 `R-SYMPTOM.assert` 자리에 옮긴다(조사자는 자리표시만 남긴다 — 그대로 동결하면 매번 FAIL). 행의 `needs` 가 이 호스트에 없으면 `freeze` 가 거부한다 — 사용자가 ① 조건이 있는 호스트에서 진행 ② 조건을 갖춘 뒤 다시 동결 ③ 그 조건 없는 probe 로 행 교체(R-SYMPTOM 이면 의미가 약해진다는 것을 기록) 중 고른다 | `bp_gate.py freeze <slug>` |
+| GATE 1 | 🛑 사용자 | 진단 · `fix_scope` · `expected_after` 채우기 · 루브릭 확정. 리더는 사용자가 채운 `expected_after` 문구를 `rubric.json` 의 `R-SYMPTOM.assert` 자리에 옮긴다(조사자는 자리표시만 남긴다 — 그대로 동결하면 매번 FAIL). 행의 `needs` 가 이 호스트에 없으면 `freeze` 가 거부한다 — 사용자가 ① 조건이 있는 호스트에서 진행 ② 조건을 갖춘 뒤 다시 동결 ③ 그 조건 없는 probe 로 행 교체(R-SYMPTOM 이면 의미가 약해진다는 것을 기록) 중 고른다. 원인 코드가 기능 플래그 뒤에 있으면 `flag_matrix`(회귀를 잴 플래그 조건)도 여기서 확정한다 — P3 에서 늘리지 않는다 | `bp_gate.py freeze <slug>` |
 | P2 RED | `bugfix-pipeline:bug-red-writer` | 실패 테스트 커밋 · sha · RED 파일 · RED 실행 명령 보고 | `bp_gate.py baseline <slug> --red <파일…>` |
 | P3 GREEN | `bugfix-pipeline:bug-green-engineer` (배정에 RED sha · RED 실행 명령) | `fix_scope` 안 최소 수정 · 커밋 본문 `RED: <sha>` | P4 |
 | P4 자기확인 | 같은 구현자 | RED 통과 — 보고일 뿐. 회귀는 `run` 의 `R-REGRESS` 가 기준선 사본으로 잰다 | P5 |

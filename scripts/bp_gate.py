@@ -214,7 +214,8 @@ def cmd_preflight(root, a):
 
 
 PLACEHOLDERS = ("{exec}", "{tree}", "{out}", "{repro}")
-_RUBRIC_KEYS = {"cause_id", "R-CAUSE", "R-SYMPTOM", "R-CONTROL"}
+_RUBRIC_KEYS = {"cause_id", "R-CAUSE", "R-SYMPTOM", "R-CONTROL", "flag_matrix"}
+_ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 BASELINE_REF = "@baseline"
 
 
@@ -251,6 +252,20 @@ def _argv(value, name, required, problems, allow_url=False):
                 problems.append(f"{name}: 모르는 자리표시자 {ph}")
 
 
+def _validate_flag_matrix(matrix, problems):
+    """R-REGRESS 를 조건마다 한 번씩 — 조건은 환경 변수 객체. GATE 1 에서 동결된다(구현자 재량이 아니다)."""
+    if not isinstance(matrix, list) or not matrix or not all(isinstance(c, dict) for c in matrix):
+        problems.append("flag_matrix 는 조건 객체의 비어 있지 않은 배열이어야 한다 — 예: "
+                        '[{"FLAG": "0"}, {"FLAG": "1"}]')
+        return
+    for i, cond in enumerate(matrix):
+        for k, v in cond.items():
+            if not _ENV_NAME.match(k) or not isinstance(v, str):
+                problems.append(f"flag_matrix[{i}]: 환경 변수 이름 → 문자열 값이어야 한다: {k}={v!r}")
+    if len({json.dumps(c, sort_keys=True) for c in matrix}) != len(matrix):
+        problems.append("flag_matrix 에 같은 조건이 겹친다")
+
+
 def _validate_rubric(root, ws, rub, problems, allow_url):
     """문제를 모으고 동결할 patch 상대경로 목록을 돌려준다."""
     for k in sorted(set(rub) - _RUBRIC_KEYS):
@@ -269,6 +284,8 @@ def _validate_rubric(root, ws, rub, problems, allow_url):
         _argv(r.get("needs"), f"{row}.needs", False, problems)
         if any(isinstance(t, str) and t.startswith("<expected_after") for t in r.get("assert") or []):
             problems.append(f"{row}.assert 에 expected_after 자리표시가 남았다 — GATE 1 에서 채운 문구로 옮긴다")
+    if "flag_matrix" in rub:
+        _validate_flag_matrix(rub["flag_matrix"], problems)
     patches = []
     ctl = rub.get("R-CONTROL")
     if not isinstance(ctl, dict) or not isinstance(ctl.get("axes"), list) or not ctl["axes"]:
@@ -771,17 +788,34 @@ def _control(profile, root, ws, led, rub, rundir):
     return True, all(a["cause_red"] and a["alive"] for a in axes), {"axes": axes}
 
 
-def _regress(profile, root, ws, led, rundir):
+def _flags_key(cond):
+    return hashlib.sha256(json.dumps(cond, sort_keys=True).encode()).hexdigest()[:12]
+
+
+def _regress_conditions(ws, led, rub, rundir):
+    """(출력, 기준선 캐시, 환경) — flag_matrix 가 없으면 하나. 조건마다 기준선 캐시가 따로다."""
+    cache = ws / "baseline_cache" / led["baseline_sha"]
+    matrix = rub.get("flag_matrix")
+    if not matrix:
+        return [(rundir / "regress", cache, None)]
+    return [(rundir / f"regress_{i}", cache / f"flags-{_flags_key(c)}", c) for i, c in enumerate(matrix)]
+
+
+def _regress(profile, root, ws, led, rub, rundir):
+    recs = []
     try:
         with _copy(root, profile, led["baseline_sha"]) as base:
-            code = bp_regress.run(base, root, rundir / "regress", root=root,
-                                  base_cache=ws / "baseline_cache" / led["baseline_sha"])
+            for out, cache, env in _regress_conditions(ws, led, rub, rundir):
+                code = bp_regress.run(base, root, out, root=root, base_cache=cache, env=env)
+                recs.append({"flags": env, "exit": code, "out": str(out)})
+                if code != 0:
+                    break
     except _CopyFailed as e:
-        return False, None, {"why": str(e)}
-    rec = {"exit": code, "out": str(rundir / "regress")}
-    if code not in (0, 1):
+        return False, None, {"why": str(e), "conditions": recs}
+    rec = {**recs[-1], "conditions": recs}  # out · exit = 멈춘(또는 마지막) 조건
+    if rec["exit"] not in (0, 1):
         return False, None, rec
-    return True, code == 0, rec
+    return True, rec["exit"] == 0, rec
 
 
 _NEXT_PHASE = {"PASS": "P5b", "CODE": "P3", "ANCHOR": "P2", "VOID": "P5", "ENV": "P5"}
@@ -831,7 +865,7 @@ def cmd_run(root, a):
         ("R-CONTROL", "control", lambda: _control_cached(profile, root, ws, led, rub, rundir)),
         ("R-CAUSE", "cause", lambda: _run_row(profile, root, ws, rub["R-CAUSE"], root, rundir / "cause.out")),
         ("R-SYMPTOM", "symptom", lambda: _run_row(profile, root, ws, rub["R-SYMPTOM"], root, rundir / "symptom.out")),
-        ("R-REGRESS", "regress", lambda: _regress(profile, root, ws, led, rundir)),
+        ("R-REGRESS", "regress", lambda: _regress(profile, root, ws, led, rub, rundir)),
     ]
     for name, key, step in steps:
         ran, passed, rec = step()
@@ -844,7 +878,7 @@ def cmd_run(root, a):
             break
     code = _judge(ws, led, head, args, rows, "run")
     if args["regress"] is False:
-        print(f"  새 빨강: {rundir / 'regress' / 'new_red.txt'} — 원인과 무관해 보이면 SPEC 으로 GATE 1 재진입(사용자 판단)")
+        print(f"  새 빨강: {Path(rows['R-REGRESS']['out']) / 'new_red.txt'} — 원인과 무관해 보이면 SPEC 으로 GATE 1 재진입(사용자 판단)")
     return code
 
 
